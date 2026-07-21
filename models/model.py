@@ -27,6 +27,11 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True, nullable=False)
 
+    # NOTE: previously missing even though auth_service.py has always
+    # queried/inserted this column directly via raw SQL. The ORM model
+    # was out of sync with the real table — added here so ORM-based
+    # code (e.g. jwt_utils.get_current_user, future refactors) matches
+    # what's actually in the database.
     email = Column(String(255), unique=True, nullable=False)
 
     password = Column(Text, nullable=False)
@@ -38,6 +43,13 @@ class User(Base):
     last_login = Column(DateTime, nullable=True)
 
     __table_args__ = (
+        # Aligned with schemas.auth_schema.UserRole, which is what
+        # RegisterUser actually validates against. The old constraint
+        # ("Commander", "Analyst", "Field Officer") didn't match any
+        # role the registration schema could ever produce, so every
+        # registration would have failed this constraint at the DB
+        # level. See migration.sql for the ALTER TABLE needed to apply
+        # this to an existing database.
         CheckConstraint(
             "role IN ('Admin', 'Officer', 'Analyst', 'Viewer')",
             name="users_role_check",
@@ -79,6 +91,7 @@ class Layer(Base):
     layer_type = Column(String(50))
     visible = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
+    file_hash = Column(String(64), nullable=True, index=True)
 
     case = relationship("Case", back_populates="layers")
     features = relationship("Feature", back_populates="layer")

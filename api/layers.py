@@ -21,28 +21,18 @@ router = APIRouter(
     tags=["Layers"]
 )
 
-
-# ===================================================
-# CREATE LAYER — Admin, Officer, Analyst
-# ===================================================
 @router.post("")
 def add_layer(layer: LayerCreate, current_user=Depends(require_roles(CAN_WRITE))):
     logger.info(f"POST /layers | user_id={current_user['user_id']} | role={current_user['role']} | body={layer.model_dump()}")
     return create_layer(layer.model_dump())
 
 
-# ===================================================
-# GET ALL LAYERS — any authenticated user
-# ===================================================
 @router.get("")
 def list_layers(current_user=Depends(get_current_user)):
     logger.info(f"GET /layers | user_id={current_user['user_id']}")
     return get_layers()
 
 
-# ===================================================
-# GET SINGLE LAYER — any authenticated user
-# ===================================================
 @router.get("/{layer_id}")
 def get_single_layer(layer_id: int, current_user=Depends(get_current_user)):
 
@@ -57,9 +47,6 @@ def get_single_layer(layer_id: int, current_user=Depends(get_current_user)):
     return layer
 
 
-# ===================================================
-# UPDATE LAYER (FULL) — Admin, Officer, Analyst
-# ===================================================
 @router.put("/{layer_id}")
 def edit_layer(layer_id: int, layer: LayerCreate, current_user=Depends(require_roles(CAN_WRITE))):
 
@@ -74,9 +61,6 @@ def edit_layer(layer_id: int, layer: LayerCreate, current_user=Depends(require_r
     return update_layer(layer_id, layer.model_dump())
 
 
-# ===================================================
-# PATCH LAYER (PARTIAL) — Admin, Officer, Analyst
-# ===================================================
 @router.patch("/{layer_id}")
 def edit_layer_partial(layer_id: int, layer: LayerPatch, current_user=Depends(require_roles(CAN_WRITE))):
 

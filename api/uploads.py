@@ -11,13 +11,18 @@ router = APIRouter(
 
 
 # ===================================================
-# GENERIC FILE UPLOAD (CSV/KML/TIFF) — Admin, Officer, Analyst
+# GENERIC FILE IMPORT (CSV/KML/TIFF) — Admin, Officer, Analyst
 # ===================================================
-@router.post("/upload")
+# NOTE: renamed from "/upload" to "/import" — GeoCLIP's image-upload
+# router now lives at "/upload" (previously "/api/v1/upload"), and two
+# routers can't both claim the same path+method. "/import" also better
+# describes what this route actually does (importing case data files),
+# as distinct from uploading an image for geolocation.
+@router.post("/import")
 async def upload_file(
     case_id: int = Form(...),
     file: UploadFile = File(...),
     current_user=Depends(require_roles(CAN_UPLOAD))
 ):
-    logger.info(f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | case_id={case_id} | filename={file.filename}")
+    logger.info(f"POST /import | user_id={current_user['user_id']} | role={current_user['role']} | case_id={case_id} | filename={file.filename}")
     return await process_upload(case_id, file)

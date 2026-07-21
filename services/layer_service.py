@@ -1,5 +1,5 @@
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from database.database import engine
 from utils.logger import logger
@@ -17,6 +17,45 @@ from utils.exception_handler import (
 def create_layer(layer: dict):
 
     logger.info(f"Creating layer | case_id={layer.get('case_id')} | name={layer.get('name')}")
+
+    
+    if layer.get("layer_type") == "group":
+
+        try:
+            with engine.connect() as conn:
+                existing = conn.execute(
+                    text("""
+                        SELECT id
+                        FROM layers
+                        WHERE case_id = :case_id
+                          AND name = :name
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """),
+                    {
+                        "case_id": layer.get("case_id"),
+                        "name": layer.get("name")
+                    }
+                ).fetchone()
+
+        except SQLAlchemyError as e:
+            logger.error(
+                f"Failed to check for reusable layer | case_id={layer.get('case_id')} | "
+                f"name={layer.get('name')} | error={e}",
+                exc_info=True
+            )
+            raise ServiceUnavailableError("Failed to create layer") from e
+
+        if existing:
+            logger.info(
+                f"Reusing existing layer instead of creating duplicate 'group' layer | "
+                f"layer_id={existing.id} | case_id={layer.get('case_id')} | name={layer.get('name')}"
+            )
+            return {
+                "success": True,
+                "layer_id": existing.id,
+                "message": "Reused existing layer"
+            }
 
     try:
         with engine.begin() as conn:
@@ -49,11 +88,128 @@ def create_layer(layer: dict):
 
             layer_id = result.scalar()
 
+    except IntegrityError as e:
+        # Most common cause: layer["case_id"] doesn't exist in the
+        # `cases` table (foreign key violation) — e.g. the client
+        # passed a case_id that was never created, or was deleted.
+        # Surfacing this as a clear 400 instead of a generic 503 so
+        # the real cause doesn't get silently swallowed.
+        logger.error(
+            f"Integrity error creating layer | case_id={layer.get('case_id')} | error={e}",
+            exc_info=True
+        )
+        raise BadRequestError(
+            f"Cannot create layer: case_id {layer.get('case_id')} does not exist."
+        ) from e
+
     except SQLAlchemyError as e:
         logger.error(f"Failed to create layer | case_id={layer.get('case_id')} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to create layer") from e
 
     logger.info(f"Layer created | layer_id={layer_id} | case_id={layer.get('case_id')}")
+
+    return {
+        "success": True,
+        "layer_id": layer_id,
+        "message": "Layer created successfully"
+    }
+
+
+# ===================================================
+# GET IMPORT LAYER BY FILE HASH (duplicate-import detection)
+# ===================================================
+
+def get_import_layer_by_hash(case_id: int, file_hash: str):
+    """
+    Returns the existing import layer dict if this exact file was
+    already imported into this case, otherwise None. Used by
+    upload_service.extract_kml to avoid creating a duplicate layer +
+    re-importing all its features when the same file is uploaded twice.
+    """
+
+    logger.info(f"Checking for duplicate import | case_id={case_id} | file_hash={file_hash}")
+
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(
+                text("""
+                    SELECT id, case_id, name, layer_type, visible, created_at
+                    FROM layers
+                    WHERE case_id = :case_id
+                      AND file_hash = :file_hash
+                      AND layer_type = 'import'
+                    LIMIT 1
+                """),
+                {"case_id": case_id, "file_hash": file_hash}
+            )
+            row = result.fetchone()
+
+    except SQLAlchemyError as e:
+        logger.error(f"Failed to check for duplicate import | case_id={case_id} | error={e}", exc_info=True)
+        raise ServiceUnavailableError("Failed to check for duplicate import") from e
+
+    if row is None:
+        return None
+
+    return {
+        "id": row.id,
+        "case_id": row.case_id,
+        "name": row.name,
+        "layer_type": row.layer_type,
+        "visible": row.visible,
+        "created_at": row.created_at,
+    }
+
+
+# ===================================================
+# CREATE IMPORT LAYER (with file_hash recorded)
+# ===================================================
+
+def create_import_layer(case_id: int, name: str, file_hash: str):
+
+    logger.info(f"Creating import layer | case_id={case_id} | name={name} | file_hash={file_hash}")
+
+    try:
+        with engine.begin() as conn:
+
+            result = conn.execute(
+                text("""
+                    INSERT INTO layers
+                    (
+                        case_id,
+                        name,
+                        layer_type,
+                        visible,
+                        file_hash
+                    )
+                    VALUES
+                    (
+                        :case_id,
+                        :name,
+                        'import',
+                        TRUE,
+                        :file_hash
+                    )
+                    RETURNING id
+                """),
+                {
+                    "case_id": case_id,
+                    "name": name,
+                    "file_hash": file_hash
+                }
+            )
+
+            layer_id = result.scalar()
+
+    except IntegrityError as e:
+        logger.error(f"Integrity error creating import layer | case_id={case_id} | error={e}", exc_info=True)
+        raise BadRequestError(f"Cannot create layer: case_id {case_id} does not exist.") from e
+
+    except SQLAlchemyError as e:
+        logger.error(f"Failed to create import layer | case_id={case_id} | error={e}", exc_info=True)
+        raise ServiceUnavailableError("Failed to create layer") from e
+
+    logger.info(f"Import layer created | layer_id={layer_id} | case_id={case_id}")
 
     return {
         "success": True,

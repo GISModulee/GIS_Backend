@@ -1,6 +1,6 @@
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
 
 from database.database import get_db
@@ -25,7 +25,6 @@ from utils.logger import logger
 
 router = APIRouter()
 
-
 @router.post(
     "/upload",
     response_model=ImageUploadResponse,
@@ -35,9 +34,16 @@ async def upload_image(
     file: Annotated[UploadFile, File(...)],
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(require_roles(CAN_UPLOAD)),
+    top_k: Annotated[
+        int | None,
+        Form(description="Number of location predictions to generate (1-20). Defaults to server setting if omitted.")
+    ] = None,
 ):
-    logger.info(f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | filename={file.filename}")
-    return await upload_image_service(file, db)
+    logger.info(
+        f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | "
+        f"filename={file.filename} | top_k={top_k}"
+    )
+    return await upload_image_service(file, db, top_k=top_k)
 
 
 @router.get(
@@ -112,3 +118,5 @@ def rename_layer(
 ):
     logger.info(f"PATCH /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']} | new_name={body.name}")
     return rename_layer_service(layer_id, body.name, db)
+
+

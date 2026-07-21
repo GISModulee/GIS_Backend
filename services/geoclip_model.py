@@ -28,9 +28,12 @@ class GeoCLIPService:
             logger.error(f"Failed to load GeoCLIP model: {e}", exc_info=True)
             raise RuntimeError("GeoCLIP model initialization failed.") from e
 
-    def predict(self, image_path: str) -> list[dict]:
+    def predict(self, image_path: str, top_k: int | None = None) -> list[dict]:
         """
-        Run inference. top_k is read from settings.
+        Run inference.
+        `top_k` is now caller-supplied (e.g. from the upload request) —
+        falls back to settings.GEOCLIP_TOP_K only if the caller doesn't
+        provide one, instead of always reading from settings.
         Raises RuntimeError if model not loaded or inference fails.
         """
         if not self._loaded or self.model is None:
@@ -38,11 +41,13 @@ class GeoCLIPService:
                 "GeoCLIP model is not loaded. Ensure load_model() is called at startup."
             )
 
-        logger.info(f"Running GeoCLIP inference | path={image_path} | top_k={settings.GEOCLIP_TOP_K}")
+        effective_top_k = top_k if top_k is not None else settings.GEOCLIP_TOP_K
+
+        logger.info(f"Running GeoCLIP inference | path={image_path} | top_k={effective_top_k}")
         try:
             with self._lock:
                 top_pred_gps, top_pred_prob = self.model.predict(
-                    image_path, top_k=settings.GEOCLIP_TOP_K
+                    image_path, top_k=effective_top_k
                 )
         except Exception as e:
             logger.error(f"GeoCLIP inference failed: {e}", exc_info=True)

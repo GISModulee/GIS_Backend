@@ -55,21 +55,26 @@ class ExifExtractor:
 
 class ImageProcessor:
     @staticmethod
-    def process_and_predict(content: bytes, extension: str) -> dict:
+    def process_and_predict(content: bytes, extension: str, top_k: int | None = None) -> dict:
+        """
+        `top_k` only affects the GeoCLIP model fallback path — if EXIF
+        GPS data is found, that's a single ground-truth point and top_k
+        doesn't apply.
+        """
         exif_gps = ExifExtractor.extract_from_bytes(content)
         if exif_gps:
             logger.info("Using EXIF source.")
             return {"source": "exif", "predictions": [exif_gps]}
 
         # Slow path: GeoCLIP needs a real file path.
-        logger.info("No EXIF GPS — falling back to GeoCLIP model.")
+        logger.info(f"No EXIF GPS — falling back to GeoCLIP model | top_k={top_k}")
         tmp_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp:
                 tmp.write(content)
                 tmp_path = tmp.name
 
-            predictions = geo_model.predict(tmp_path)  # raises RuntimeError on failure
+            predictions = geo_model.predict(tmp_path, top_k=top_k)  # raises RuntimeError on failure
 
         finally:
             if tmp_path and os.path.exists(tmp_path):

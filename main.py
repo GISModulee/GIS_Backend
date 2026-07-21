@@ -68,7 +68,7 @@ app.add_middleware(
 
 app.add_middleware(LoggingMiddleware)
 app.include_router(auth_router)
-app.include_router(geoclip_router, prefix="/api/v1", tags=["Images"])
+app.include_router(geoclip_router, tags=["Images"])
 app.include_router(feature_router)
 app.include_router(layer_router)
 app.include_router(comment_router)

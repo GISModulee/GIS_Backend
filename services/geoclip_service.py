@@ -22,18 +22,38 @@ from models.model import Feature, ImageRecord, Layer
 from services.geoclip_processor import FileUtils, ImageProcessor
 from services.geoclip_validator import FileValidator
 
+# Sane bounds for a user-supplied top_k — prevents someone from
+# requesting e.g. top_k=100000 and hammering the model / DB.
+MIN_TOP_K = 1
+MAX_TOP_K = 20
+
 
 def generate_layer_name(layer_id: int) -> str:
     return f"Untitled {layer_id}"
 
 
+def _validate_top_k(top_k: int | None) -> int:
+    if top_k is None:
+        return settings.GEOCLIP_TOP_K
+
+    if top_k < MIN_TOP_K or top_k > MAX_TOP_K:
+        raise BadRequestError(
+            f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K} (got {top_k})."
+        )
+
+    return top_k
+
+
 # ===================================================
 # UPLOAD IMAGE
 # ===================================================
-async def upload_image(file: UploadFile, db: Session):
+async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
 
     start_time = time.monotonic()
-    logger.info(f"Processing GeoCLIP upload | filename={file.filename}")
+
+    effective_top_k = _validate_top_k(top_k)
+
+    logger.info(f"Processing GeoCLIP upload | filename={file.filename} | top_k={effective_top_k}")
 
     # --- 1. Extension validation ---
     FileValidator.validate_extension(file.filename)
@@ -69,7 +89,9 @@ async def upload_image(file: UploadFile, db: Session):
 
     # --- 6. Run prediction ---
     try:
-        result = await run_in_threadpool(ImageProcessor.process_and_predict, content, real_extension)
+        result = await run_in_threadpool(
+            ImageProcessor.process_and_predict, content, real_extension, effective_top_k
+        )
     except Exception as e:
         logger.error(f"Prediction failed | filename={file.filename} | error={e}", exc_info=True)
         raise ServiceUnavailableError("GeoCLIP prediction failed") from e
@@ -78,7 +100,7 @@ async def upload_image(file: UploadFile, db: Session):
         logger.error(f"No predictions returned | filename={file.filename}")
         raise UnprocessableEntityError("No location predictions could be generated for this image.")
 
-    # --- 7. Persist layer + image + feature ---
+    # --- 7. Persist layer + image + ONE FEATURE PER COORDINATE ---
     try:
         file_id = str(uuid.uuid4())
         layer = Layer(
@@ -90,7 +112,8 @@ async def upload_image(file: UploadFile, db: Session):
         db.flush()  # get layer.id without committing
         layer.name = generate_layer_name(layer.id)
 
-        top_prediction = result["predictions"][0]
+        predictions = result["predictions"]
+        top_prediction = predictions[0]
 
         image = ImageRecord(
             id=file_id,
@@ -103,36 +126,40 @@ async def upload_image(file: UploadFile, db: Session):
             location=f"SRID=4326;POINT({top_prediction['lon']} {top_prediction['lat']})",
         )
         db.add(image)
-        multipoint_wkt = "MULTIPOINT(" + ", ".join(
-            f"{pred['lon']} {pred['lat']}" for pred in result["predictions"]
-        ) + ")"
 
-        feature = Feature(
-            layer_id=layer.id,
-            name=file.filename,
-            geom=f"SRID=4326;{multipoint_wkt}",
-            geometry_type="MultiPoint",
-            properties={
-                "type": "multipoint",
-                "layerType": "multipoint",
-                "layer_type": "multipoint",
-                "category": "GeoCLIP Prediction",
-                "color": "#dc2626",
-                "image_id": file_id,
-                "filename": file.filename,
-                "source": result.get("source"),
-                "points": [
-                    {
-                        "rank": index + 1,
-                        "lat": pred["lat"],
-                        "lon": pred["lon"],
-                        "score": pred["score"],
-                    }
-                    for index, pred in enumerate(result["predictions"])
-                ],
-            },
-        )
-        db.add(feature)
+        created_feature_ids = []
+
+        for rank, pred in enumerate(predictions, start=1):
+
+            feature_name = (
+                file.filename if len(predictions) == 1
+                else f"{file.filename} (prediction {rank})"
+            )
+
+            feature = Feature(
+                layer_id=layer.id,
+                name=feature_name,
+                geom=f"SRID=4326;POINT({pred['lon']} {pred['lat']})",
+                geometry_type="Point",
+                properties={
+                    "type": "point",
+                    "layerType": "point",
+                    "layer_type": "point",
+                    "category": "GeoCLIP Prediction",
+                    "color": "#dc2626",
+                    "image_id": file_id,
+                    "filename": file.filename,
+                    "source": result.get("source"),
+                    "rank": rank,
+                    "lat": pred["lat"],
+                    "lon": pred["lon"],
+                    "score": pred["score"],
+                },
+            )
+            db.add(feature)
+            db.flush()
+            created_feature_ids.append(feature.id)
+
         db.commit()
 
     except IntegrityError as e:
@@ -157,14 +184,16 @@ async def upload_image(file: UploadFile, db: Session):
         raise ServiceUnavailableError("Database save failed") from e
 
     elapsed = time.monotonic() - start_time
-    logger.info(f"Upload complete | layer={layer.id} | time={elapsed:.2f}s")
+    logger.info(
+        f"Upload complete | layer={layer.id} | features_created={len(created_feature_ids)} | time={elapsed:.2f}s"
+    )
 
     return {
         "id": file_id,
         "layer_id": layer.id,
         "layer_name": layer.name,
         "filename": file.filename,
-        "predictions_created": len(result["predictions"]),
+        "predictions_created": len(predictions),
         "data": result,
         "status": "success",
     }
@@ -248,9 +277,6 @@ def get_image(image_id: str, db: Session) -> Response:
         logger.warning(f"Image not found | image_id={image_id}")
         raise NotFoundError("Image not found")
 
-    # Uses the real MIME type detected and stored at upload time,
-    # falling back to jpeg only for legacy rows saved before this
-    # column existed.
     return Response(content=record.image_data, media_type=record.content_type or "image/jpeg")
 
 
@@ -269,7 +295,6 @@ def delete_layer(layer_id: int, db: Session) -> dict:
 
     layer_name = layer.name
 
-    # Delete children first — no ON DELETE CASCADE assumed on the FKs.
     db.query(Feature).filter(Feature.layer_id == layer_id).delete(synchronize_session=False)
     db.query(ImageRecord).filter(ImageRecord.layer_id == layer_id).delete(synchronize_session=False)
     db.delete(layer)
