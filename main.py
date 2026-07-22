@@ -11,7 +11,6 @@ from utils.request_context import (
     set_request_id,
 )
 from utils.exception_handler import register_exception_handlers
-from init_db import init_tables
 
 from middleware.logging_middleware import LoggingMiddleware
 from api.features import router as feature_router
@@ -21,7 +20,7 @@ from api.cases import router as case_router
 from api.uploads import router as upload_router
 from api.geoclip import router as geoclip_router
 from api.auth import router as auth_router
-
+from api.vector import router as vector_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up GeoIntelligence API")
@@ -29,13 +28,6 @@ async def lifespan(app: FastAPI):
         f"Config | MAX_FILE_MB={settings.MAX_FILE_SIZE_MB} | "
         f"TOP_K={settings.GEOCLIP_TOP_K}"
     )
-
-    # FIX (issue #13 in review): table creation used to only happen via
-    # a manual `python init_db.py` invocation, separate from the app
-    # itself and easy to forget before a fresh deploy. Base.metadata.
-    # create_all() is idempotent (CREATE TABLE IF NOT EXISTS semantics
-    # under the hood), so it's safe to call on every startup.
-    init_tables()
 
     geo_model.load_model()
     logger.info("GIS Backend started successfully")
@@ -65,16 +57,10 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
-# FIX (issue #9 in review): allow_origins=["*"] previously meant ANY
-# origin could script authenticated Bearer-token calls against this
-# API. Now driven by ALLOWED_ORIGINS in .env (comma-separated list),
-# matching what utils/config.py's allowed_origins_list property was
-# already built for but never used. Set ALLOWED_ORIGINS in your .env,
-# e.g.:
-#   ALLOWED_ORIGINS=https://your-frontend.example.com,http://localhost:5173
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
+    # allow_origins=settings.allowed_origins_list,
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
@@ -88,6 +74,7 @@ app.include_router(layer_router)
 app.include_router(comment_router)
 app.include_router(case_router)
 app.include_router(upload_router)
+app.include_router(vector_router)
 
 
 @app.get("/health", tags=["System"])
