@@ -48,7 +48,6 @@ def setup_logger() -> logging.Logger:
 
     logger = logging.getLogger("backend")
 
-    # Guard: prevent duplicate handlers on re-import (e.g. reload in dev).
     if logger.handlers:
         return logger
 

@@ -242,15 +242,7 @@ def create_untitled_layer(case_id: int):
     try:
         with engine.begin() as conn:
 
-            # FIX (issue #3 in review): SELECT MAX(...) followed by a
-            # separate INSERT is not atomic — two concurrent draw
-            # requests for the same case could both read the same max
-            # and insert two layers named e.g. "Auto Layer 3". A
-            # transaction-scoped Postgres advisory lock, keyed on
-            # case_id, serializes this: the second concurrent caller
-            # blocks here until the first commits (or rolls back),
-            # then sees the first's row when it computes its own MAX.
-            # The lock releases automatically at transaction end.
+        
             conn.execute(
                 text("SELECT pg_advisory_xact_lock(:key)"),
                 {"key": case_id}

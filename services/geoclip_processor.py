@@ -56,23 +56,11 @@ class ExifExtractor:
 class ImageProcessor:
     @staticmethod
     def process_and_predict(content: bytes, extension: str, top_k: int | None = None) -> dict:
-<<<<<<< HEAD
-=======
-        """
-        `top_k` only affects the GeoCLIP model fallback path — if EXIF
-        GPS data is found, that's a single ground-truth point and top_k
-        doesn't apply.
-        """
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
         exif_gps = ExifExtractor.extract_from_bytes(content)
         if exif_gps:
             logger.info("Using EXIF source.")
             return {"source": "exif", "predictions": [exif_gps]}
 
-<<<<<<< HEAD
-=======
-        # Slow path: GeoCLIP needs a real file path.
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
         logger.info(f"No EXIF GPS — falling back to GeoCLIP model | top_k={top_k}")
         tmp_path = None
         try:
@@ -80,11 +68,7 @@ class ImageProcessor:
                 tmp.write(content)
                 tmp_path = tmp.name
 
-<<<<<<< HEAD
             predictions = geo_model.predict(tmp_path, top_k=top_k)
-=======
-            predictions = geo_model.predict(tmp_path, top_k=top_k)  # raises RuntimeError on failure
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
 
         finally:
             if tmp_path and os.path.exists(tmp_path):
@@ -96,8 +80,4 @@ class ImageProcessor:
             for p in predictions
         ]
         logger.info(f"GeoCLIP returned {len(cleaned)} predictions.")
-<<<<<<< HEAD
         return {"source": "model", "predictions": cleaned}
-=======
-        return {"source": "model", "predictions": cleaned}
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d

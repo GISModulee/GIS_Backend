@@ -25,6 +25,19 @@ from utils.exception_handler import BadRequestError, UnprocessableEntityError
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+
+# ===================================================
+# FILENAME SANITIZATION
+# ===================================================
+# FIX (issue #4 in review): file.filename comes straight from the
+# client with no sanitization. A crafted filename (e.g. containing
+# "../../") could previously write outside UPLOAD_FOLDER via
+# os.path.join(UPLOAD_FOLDER, file.filename). os.path.basename()
+# strips any directory component the client tries to sneak in, and
+# the random prefix avoids collisions/overwrites between concurrent
+# uploads that happen to share a filename. The ORIGINAL filename is
+# still used everywhere else (layer naming, hashing display, logs) —
+# only the on-disk path uses the sanitized version.
 def _sanitize_filename(filename: str) -> str:
     base = os.path.basename((filename or "").replace("\\", "/"))
     if not base or base in (".", ".."):
@@ -35,8 +48,7 @@ def _sanitize_filename(filename: str) -> str:
 # ===================================================
 # PROCESS UPLOADED FILE
 # ===================================================
-
-async def process_upload(
+def process_upload(
     case_id: int,
     file: UploadFile,
     layer_name: str | None = None,
@@ -46,8 +58,11 @@ async def process_upload(
     safe_name = _sanitize_filename(file.filename)
     file_path = os.path.join(UPLOAD_FOLDER, safe_name)
 
+    # file.file is the underlying SpooledTemporaryFile — .read() here
+    # is a plain synchronous call (UploadFile.read() is async and
+    # would require `await`, which we no longer have in this function).
     with open(file_path, "wb") as f:
-        f.write(await file.read())
+        f.write(file.file.read())
 
     extension = file.filename.split(".")[-1].lower()
 

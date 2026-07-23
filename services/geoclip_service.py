@@ -4,7 +4,6 @@ import uuid
 from typing import List
 
 from fastapi import UploadFile
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -19,17 +18,12 @@ from utils.exception_handler import (
     UnprocessableEntityError,
 )
 from models.model import Feature, ImageRecord, Layer
-<<<<<<< HEAD
 from schemas.feature_schema import FeatureCreate
 from services.geoclip_processor import FileUtils, ImageProcessor
 from services.geoclip_validator import FileValidator
 from services.case_service import create_untitled_case
 from services.layer_service import create_layer, patch_layer
 from services.feature_service import create_feature
-=======
-from services.geoclip_processor import FileUtils, ImageProcessor
-from services.geoclip_validator import FileValidator
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
 
 # Sane bounds for a user-supplied top_k — prevents someone from
 # requesting e.g. top_k=100000 and hammering the model / DB.
@@ -52,62 +46,28 @@ def _validate_top_k(top_k: int | None) -> int:
 
     return top_k
 
-
-# ===================================================
-# UPLOAD IMAGE
-# ===================================================
-<<<<<<< HEAD
-# FIX (issues #1 and #2 in review): this used to build ORM Layer/
-# Feature objects directly (db.add(...) / db.flush() / db.commit()),
-# bypassing layer_service.py and feature_service.py entirely. That
-# meant:
-#   (a) it never set case_id on the Layer or Feature it created, so
-#       GeoCLIP results had NULL case_id and never showed up anywhere
-#       your frontend queries "by case" the way it does for imported
-#       features — this was the root cause of GeoCLIP predictions not
-#       displaying properly.
-#   (b) layer-creation logic existed in four different places with no
-#       single source of truth.
-# Now it resolves a case the same way upload_service.extract_kml does
-# (create_untitled_case), and creates the layer + features through the
-# shared layer_service / feature_service functions — the exact same
-# code path the working KML import uses.
-#
-# `layer_name`: optional. If provided, it's used as-is for the new
-# layer. If omitted, falls back to the previous auto-generated
-# "Untitled {layer_id}" naming.
-# `created_by`: optional, forwarded from the authenticated user in
-# api/geoclip.py.
-async def upload_image(
+def upload_image(
     file: UploadFile,
     db: Session,
     top_k: int | None = None,
     layer_name: str | None = None,
     created_by: int | None = None,
 ):
-=======
-async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
 
     start_time = time.monotonic()
 
     effective_top_k = _validate_top_k(top_k)
 
-<<<<<<< HEAD
     logger.info(
         f"Processing GeoCLIP upload | filename={file.filename} | top_k={effective_top_k} | "
         f"layer_name={layer_name} | created_by={created_by}"
     )
-=======
-    logger.info(f"Processing GeoCLIP upload | filename={file.filename} | top_k={effective_top_k}")
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
 
-    # --- 1. Extension validation ---
     FileValidator.validate_extension(file.filename)
 
-    # --- 2. Read file bytes ---
+   
     try:
-        content = await file.read()
+        content = file.file.read()
     except Exception as e:
         logger.error(f"Failed to read uploaded file | filename={file.filename} | error={e}", exc_info=True)
         raise BadRequestError("Unable to read uploaded file") from e
@@ -134,11 +94,8 @@ async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
             "status": "already_processed",
         }
 
-    # --- 6. Run prediction ---
     try:
-        result = await run_in_threadpool(
-            ImageProcessor.process_and_predict, content, real_extension, effective_top_k
-        )
+        result = ImageProcessor.process_and_predict(content, real_extension, effective_top_k)
     except Exception as e:
         logger.error(f"Prediction failed | filename={file.filename} | error={e}", exc_info=True)
         raise ServiceUnavailableError("GeoCLIP prediction failed") from e
@@ -147,7 +104,6 @@ async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
         logger.error(f"No predictions returned | filename={file.filename}")
         raise UnprocessableEntityError("No location predictions could be generated for this image.")
 
-<<<<<<< HEAD
     predictions = result["predictions"]
     top_prediction = predictions[0]
 
@@ -208,47 +164,12 @@ async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
         feature_result = create_feature(feature_in, created_by)
         created_feature_ids.append(feature_result["feature_id"])
 
-    # --- 10. Persist the ImageRecord itself ---
-    # NOTE: still ORM/Session-based — there's no raw-SQL service for
-    # images yet (see issue #11 in the review: the codebase has two
-    # coexisting DB access patterns). Because the layer and features
-    # above are now created in their OWN committed transactions
-    # (via layer_service/feature_service) rather than one big
-    # transaction shared with this insert, a failure here (e.g. a
-    # concurrent duplicate-upload race) can no longer roll the layer
-    # and features back with it — the recovery branch below returns
-    # the winning duplicate's record, but the losing request's layer
-    # and features it already created remain in the database as
-    # orphans. This is a known trade-off of reusing the same
-    # creation path as file import; consider a cleanup job or a
-    # SELECT-before-INSERT re-check if this proves to be a problem
-    # in practice.
+    
     try:
         image = ImageRecord(
             id=file_id,
             file_hash=file_hash,
             layer_id=layer_id,
-=======
-    # --- 7. Persist layer + image + ONE FEATURE PER COORDINATE ---
-    try:
-        file_id = str(uuid.uuid4())
-        layer = Layer(
-            name="__pending__",
-            layer_type="geoclip_prediction",
-            visible=True,
-        )
-        db.add(layer)
-        db.flush()  # get layer.id without committing
-        layer.name = generate_layer_name(layer.id)
-
-        predictions = result["predictions"]
-        top_prediction = predictions[0]
-
-        image = ImageRecord(
-            id=file_id,
-            file_hash=file_hash,
-            layer_id=layer.id,
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
             image_data=content,
             filename=file.filename,
             content_type=detected_mime,
@@ -256,51 +177,9 @@ async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
             location=f"SRID=4326;POINT({top_prediction['lon']} {top_prediction['lat']})",
         )
         db.add(image)
-<<<<<<< HEAD
         db.commit()
 
     except IntegrityError as e:
-=======
-
-        created_feature_ids = []
-
-        for rank, pred in enumerate(predictions, start=1):
-
-            feature_name = (
-                file.filename if len(predictions) == 1
-                else f"{file.filename} (prediction {rank})"
-            )
-
-            feature = Feature(
-                layer_id=layer.id,
-                name=feature_name,
-                geom=f"SRID=4326;POINT({pred['lon']} {pred['lat']})",
-                geometry_type="Point",
-                properties={
-                    "type": "point",
-                    "layerType": "point",
-                    "layer_type": "point",
-                    "category": "GeoCLIP Prediction",
-                    "color": "#dc2626",
-                    "image_id": file_id,
-                    "filename": file.filename,
-                    "source": result.get("source"),
-                    "rank": rank,
-                    "lat": pred["lat"],
-                    "lon": pred["lon"],
-                    "score": pred["score"],
-                },
-            )
-            db.add(feature)
-            db.flush()
-            created_feature_ids.append(feature.id)
-
-        db.commit()
-
-    except IntegrityError as e:
-        # Two concurrent uploads of the same file raced past the
-        # duplicate check above — recover by returning the row that won.
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
         db.rollback()
         logger.warning(f"Duplicate upload race detected | file_hash={file_hash} | error={e}")
 
@@ -321,22 +200,13 @@ async def upload_image(file: UploadFile, db: Session, top_k: int | None = None):
 
     elapsed = time.monotonic() - start_time
     logger.info(
-<<<<<<< HEAD
         f"Upload complete | layer={layer_id} | features_created={len(created_feature_ids)} | time={elapsed:.2f}s"
-=======
-        f"Upload complete | layer={layer.id} | features_created={len(created_feature_ids)} | time={elapsed:.2f}s"
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
     )
 
     return {
         "id": file_id,
-<<<<<<< HEAD
         "layer_id": layer_id,
         "layer_name": resolved_layer_name,
-=======
-        "layer_id": layer.id,
-        "layer_name": layer.name,
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
         "filename": file.filename,
         "predictions_created": len(predictions),
         "data": result,
@@ -351,11 +221,7 @@ def get_images_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> 
 
     logger.info(f"Fetching images for layer | layer_id={layer_id} | limit={limit} | offset={offset}")
 
-<<<<<<< HEAD
     limit = max(1, min(limit, 500))
-=======
-    limit = max(1, min(limit, 500))  # hard ceiling to prevent abuse
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d
     offset = max(0, offset)
 
     return (
@@ -474,8 +340,4 @@ def rename_layer(layer_id: int, new_name: str, db: Session) -> dict:
     db.commit()
 
     logger.info(f"Layer renamed | id={layer_id} | new_name={new_name}")
-<<<<<<< HEAD
     return {"id": layer_id, "name": new_name, "status": "renamed"}
-=======
-    return {"id": layer_id, "name": new_name, "status": "renamed"}
->>>>>>> 56145a9ecfc68c1c4e5666bdad7eccda603cbe2d

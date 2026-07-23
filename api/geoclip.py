@@ -30,7 +30,7 @@ router = APIRouter()
     response_model=ImageUploadResponse,
     summary="Upload image and create GeoCLIP layer",
 )
-async def upload_image(
+def upload_image(
     file: Annotated[UploadFile, File(...)],
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(require_roles(CAN_UPLOAD)),
@@ -47,7 +47,7 @@ async def upload_image(
         f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | "
         f"filename={file.filename} | top_k={top_k} | layer_name={layer_name}"
     )
-    return await upload_image_service(
+    return upload_image_service(
         file,
         db,
         top_k=top_k,

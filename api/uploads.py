@@ -14,7 +14,7 @@ router = APIRouter(
 # GENERIC FILE IMPORT (CSV/KML/TIFF) — Admin, Officer, Analyst
 # ===================================================
 @router.post("/import")
-async def upload_file(
+def upload_file(
     case_id: int = Form(...),
     file: UploadFile = File(...),
     layer_name: str | None = Form(
@@ -28,7 +28,7 @@ async def upload_file(
         f"POST /import | user_id={current_user['user_id']} | role={current_user['role']} | "
         f"case_id={case_id} | filename={file.filename} | layer_name={layer_name}"
     )
-    return await process_upload(
+    return process_upload(
         case_id,
         file,
         layer_name=layer_name,
