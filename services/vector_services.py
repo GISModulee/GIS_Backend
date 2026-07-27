@@ -3,7 +3,7 @@ from sqlalchemy.exc import DataError, SQLAlchemyError
  
 from database.database import engine
 from utils.logger import logger
-from utils.exception_handler import (
+from utils.exceptions import (
     BadRequestError,
     UnprocessableEntityError,
     ServiceUnavailableError,
@@ -233,7 +233,13 @@ def symdifference_features(feature_ids):
 # ===================================================
 # Buffer FEATURE
 # ===================================================
- 
+# FIX (circle border-gap issue): default ST_Buffer quad_segs=8
+# produces a 32-sided polygon per circle. When two such circles are
+# intersected, the intersection boundary is made of new straight
+# edges at the crossing points, which don't line up flush with the
+# coarse original edges — visible as a gap/mismatch on the map.
+# Raising quad_segs to 64 (a 256-sided polygon) makes the
+# approximation dense enough that this is visually imperceptible.
 def buffer_feature(feature_id, distance):
  
     conn = engine.connect()
@@ -243,7 +249,7 @@ def buffer_feature(feature_id, distance):
         result = conn.execute(
             text("""
                 SELECT ST_AsGeoJSON(
-                    ST_Buffer(geom::geography, :distance)::geometry
+                    ST_Buffer(geom::geography, :distance, 256)::geometry
                 ) AS geometry
                 FROM features
                 WHERE id = :feature_id
@@ -344,4 +350,3 @@ def convex_hull(feature_ids):
  
     finally:
         conn.close()
- 

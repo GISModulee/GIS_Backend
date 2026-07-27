@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from utils.config import settings
 from utils.logger import logger
-from utils.exception_handler import (
+from utils.exceptions import (
     NotFoundError,
     BadRequestError,
     ServiceUnavailableError,

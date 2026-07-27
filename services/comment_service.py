@@ -4,23 +4,45 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import engine
+from utils.config import settings
 from utils.logger import logger
-from utils.exception_handler import NotFoundError, ServiceUnavailableError
+from utils.exceptions import NotFoundError, ServiceUnavailableError
+from services.comment_validator import CommentAttachmentValidator
 
 
 # ===================================================
 # CREATE COMMENT
 # ===================================================
+# `attachment` (renamed from `image`) now accepts image (jpg/png/webp),
+# PDF, DOCX, or plain text — validated the same way GeoCLIP uploads
+# are (extension check + magic-byte content check), not just
+# rubber-stamped as "image/jpeg" like the old code did regardless of
+# what was actually uploaded.
 
-def create_comment(feature_id, user_id, comment, image: UploadFile | None = None):
+def create_comment(feature_id, user_id, comment, attachment: UploadFile | None = None):
 
-    logger.info(f"Creating comment | feature_id={feature_id} | user_id={user_id}")
+    logger.info(
+        f"Creating comment | feature_id={feature_id} | user_id={user_id} | "
+        f"has_attachment={attachment is not None}"
+    )
 
-    image_data = None
+    attachment_data = None
+    attachment_filename = None
+    attachment_content_type = None
 
-    if image is not None:
-        image.file.seek(0)
-        image_data = image.file.read()
+    if attachment is not None:
+
+        CommentAttachmentValidator.validate_extension(attachment.filename)
+
+        attachment.file.seek(0)
+        content = attachment.file.read()
+
+        CommentAttachmentValidator.validate_size(content, settings.MAX_FILE_SIZE_BYTES)
+        _, detected_mime = CommentAttachmentValidator.validate_magic_bytes(content, attachment.filename)
+
+        attachment_data = content
+        attachment_filename = attachment.filename
+        attachment_content_type = detected_mime
 
     try:
         with engine.begin() as conn:
@@ -32,14 +54,18 @@ def create_comment(feature_id, user_id, comment, image: UploadFile | None = None
                         feature_id,
                         user_id,
                         comment,
-                        image_data
+                        attachment_data,
+                        attachment_filename,
+                        attachment_content_type
                     )
                     VALUES
                     (
                         :feature_id,
                         :user_id,
                         :comment,
-                        :image_data
+                        :attachment_data,
+                        :attachment_filename,
+                        :attachment_content_type
                     )
                     RETURNING id
                 """),
@@ -47,7 +73,9 @@ def create_comment(feature_id, user_id, comment, image: UploadFile | None = None
                     "feature_id": feature_id,
                     "user_id": user_id,
                     "comment": comment,
-                    "image_data": image_data
+                    "attachment_data": attachment_data,
+                    "attachment_filename": attachment_filename,
+                    "attachment_content_type": attachment_content_type,
                 }
             )
 
@@ -67,8 +95,17 @@ def create_comment(feature_id, user_id, comment, image: UploadFile | None = None
 
 
 # ===================================================
-# GET COMMENTS OF A FEATURE
+# GET COMMENTS OF A FEATURE (multi-user thread)
 # ===================================================
+# Every comment on this feature_id, from every user who's commented on
+# it, in one ordered list — this IS the multi-user behavior: User1's
+# "hello" and User2's reply both live under the same feature_id and
+# both show up here, in order, each tagged with who wrote it via the
+# JOIN against `users`. Any authenticated user can read the thread
+# (see api/comments.py's get_current_user dependency); anyone with
+# CAN_COMMENT can add to it — nothing scopes a comment to only its
+# author, so this was already structurally multi-user before, it just
+# didn't tell you WHO said what. Now it does.
 
 def get_feature_comments(feature_id):
 
@@ -80,15 +117,20 @@ def get_feature_comments(feature_id):
             result = conn.execute(
                 text("""
                     SELECT
-                        id,
-                        feature_id,
-                        user_id,
-                        comment,
-                        image_data,
-                        created_at
-                    FROM comments
-                    WHERE feature_id = :feature_id
-                    ORDER BY created_at ASC
+                        c.id,
+                        c.feature_id,
+                        c.user_id,
+                        u.full_name AS user_full_name,
+                        u.username AS user_username,
+                        u.role AS user_role,
+                        c.comment,
+                        c.attachment_filename,
+                        c.attachment_content_type,
+                        c.created_at
+                    FROM comments c
+                    LEFT JOIN users u ON u.id = c.user_id
+                    WHERE c.feature_id = :feature_id
+                    ORDER BY c.created_at ASC
                 """),
                 {
                     "feature_id": feature_id
@@ -102,8 +144,13 @@ def get_feature_comments(feature_id):
                     "id": row.id,
                     "feature_id": row.feature_id,
                     "user_id": row.user_id,
+                    "user_full_name": row.user_full_name,
+                    "user_username": row.user_username,
+                    "user_role": row.user_role,
                     "comment": row.comment,
-                    "has_image": row.image_data is not None,
+                    "has_attachment": row.attachment_filename is not None,
+                    "attachment_filename": row.attachment_filename,
+                    "attachment_content_type": row.attachment_content_type,
                     "created_at": row.created_at
                 })
 
@@ -137,9 +184,6 @@ def update_comment(comment_id, comment):
                 }
             )
 
-            # FIX (issue #7 in review): previously this executed the UPDATE
-            # and returned success unconditionally, even if comment_id
-            # didn't exist — silently reporting success for a no-op.
             if result.rowcount == 0:
                 logger.warning(f"Update comment failed: not found | comment_id={comment_id}")
                 raise NotFoundError("Comment not found")
@@ -180,8 +224,6 @@ def delete_comment(comment_id):
                 }
             )
 
-            # FIX (issue #7 in review): same rowcount gap as update_comment
-            # above — deleting a nonexistent comment used to report success.
             if result.rowcount == 0:
                 logger.warning(f"Delete comment failed: not found | comment_id={comment_id}")
                 raise NotFoundError("Comment not found")
@@ -202,19 +244,25 @@ def delete_comment(comment_id):
 
 
 # ===================================================
-# GET COMMENT IMAGE
+# GET COMMENT ATTACHMENT
 # ===================================================
+# RENAMED from get_comment_image — previously always served the blob
+# back as "image/jpeg" no matter what was actually stored, which was
+# already wrong for any non-JPEG image and would have been actively
+# broken for PDFs/DOCX/text. Now serves the real content_type, and
+# sets Content-Disposition with the original filename so a PDF/DOCX
+# downloads or opens correctly instead of arriving as an unnamed blob.
 
-def get_comment_image(comment_id):
+def get_comment_attachment(comment_id):
 
-    logger.info(f"Fetching comment image | comment_id={comment_id}")
+    logger.info(f"Fetching comment attachment | comment_id={comment_id}")
 
     try:
         with engine.connect() as conn:
 
             result = conn.execute(
                 text("""
-                    SELECT image_data
+                    SELECT attachment_data, attachment_filename, attachment_content_type
                     FROM comments
                     WHERE id = :id
                 """),
@@ -226,18 +274,21 @@ def get_comment_image(comment_id):
             row = result.fetchone()
 
     except SQLAlchemyError as e:
-        logger.error(f"Failed to fetch comment image | comment_id={comment_id} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to fetch comment image") from e
+        logger.error(f"Failed to fetch comment attachment | comment_id={comment_id} | error={e}", exc_info=True)
+        raise ServiceUnavailableError("Failed to fetch comment attachment") from e
 
     if row is None:
-        logger.warning(f"Comment image fetch failed: comment not found | comment_id={comment_id}")
+        logger.warning(f"Comment attachment fetch failed: comment not found | comment_id={comment_id}")
         raise NotFoundError("Comment not found")
 
-    if row.image_data is None:
-        logger.warning(f"Comment image fetch failed: no image | comment_id={comment_id}")
-        raise NotFoundError("No image found")
+    if row.attachment_data is None:
+        logger.warning(f"Comment attachment fetch failed: no attachment | comment_id={comment_id}")
+        raise NotFoundError("No attachment found")
 
     return Response(
-        content=row.image_data,
-        media_type="image/jpeg"
+        content=row.attachment_data,
+        media_type=row.attachment_content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{row.attachment_filename}"'
+        }
     )

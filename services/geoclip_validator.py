@@ -1,7 +1,7 @@
 import magic
 
 from utils.logger import logger
-from utils.exception_handler import BadRequestError, PayloadTooLargeError, UnsupportedMediaTypeError
+from utils.exceptions import BadRequestError, PayloadTooLargeError, UnsupportedMediaTypeError
 
 
 ALLOWED_MIME_TYPES: dict[str, str] = {

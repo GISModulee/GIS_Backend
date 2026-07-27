@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 from database.database import engine
 from schemas.feature_schema import FeatureCreate
 from utils.logger import logger
-from utils.exception_handler import (
+from utils.exceptions import (
     NotFoundError,
     BadRequestError,
     UnprocessableEntityError,
@@ -130,7 +130,8 @@ def create_feature(feature, created_by: int | None = None):
                                         ),
                                         3857
                                     ),
-                                    :radius
+                                    :radius,
+                                    256
                                 ),
                                 4326
                             ),

@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Boolean,
     CheckConstraint,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -72,6 +73,15 @@ class Layer(Base):
     features = relationship("Feature", back_populates="layer")
     images = relationship("ImageRecord", back_populates="layer")
 
+    __table_args__ = (
+        # No two layers in the same case may share a name. NULL case_id
+        # is exempt from this (Postgres treats NULLs as distinct in a
+        # unique constraint), but every layer creation path in this app
+        # now resolves a real case_id before inserting, so this should
+        # never actually be relied on for NULL case_id layers.
+        UniqueConstraint("case_id", "name", name="uq_layers_case_id_name"),
+    )
+
 
 class Feature(Base):
     __tablename__ = "features"
@@ -103,10 +113,24 @@ class Comment(Base):
     id = Column(Integer, primary_key=True)
     feature_id = Column(Integer, ForeignKey("features.id", ondelete="CASCADE"), nullable=False)
 
-    user_id = Column(Integer)
+    # FK added (previously a bare Integer column with no constraint) —
+    # needed to safely JOIN against `users` in get_feature_comments() so
+    # every comment can be attributed to its author for the multi-user
+    # thread view. nullable=True kept so historical rows with no user_id
+    # (or one that no longer resolves) don't break.
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     comment = Column(Text, nullable=False)
 
-    image_data = Column(LargeBinary)
+    # RENAMED from image_data + two new columns: comments used to only
+    # support a single hardcoded "image/jpeg" attachment. Now supports
+    # any of the allowed types (image, PDF, DOCX, plain text) — see
+    # services/comment_validator.py — and the real filename/content
+    # type are stored so they can be served back correctly instead of
+    # always being labeled image/jpeg regardless of what was uploaded.
+    attachment_data = Column(LargeBinary, nullable=True)
+    attachment_filename = Column(String(255), nullable=True)
+    attachment_content_type = Column(String(100), nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
 
     feature = relationship("Feature", back_populates="comments")
@@ -117,7 +141,7 @@ class ImageRecord(Base):
 
     id = Column(String, primary_key=True, index=True)
     file_hash = Column(String, unique=True, index=True, nullable=False)
-    layer_id = Column(Integer,ForeignKey("layers.id", ondelete="CASCADE"),nullable=False,index=True,)
+    layer_id = Column(Integer, ForeignKey("layers.id"), nullable=False, index=True)
     image_data = Column(LargeBinary, nullable=False)
     filename = Column(String, nullable=False)
 

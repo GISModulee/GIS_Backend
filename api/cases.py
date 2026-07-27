@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from schemas.case_schema import CaseCreate, CasePatch
-from utils.exception_handler import NotFoundError
+from utils.exceptions import NotFoundError
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_WRITE, CAN_DELETE_CASE
 

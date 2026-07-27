@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Form, File, UploadFile
 from services.comment_service import (
     create_comment,
     get_feature_comments,
-    get_comment_image
+    get_comment_attachment
 )
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_COMMENT
@@ -13,12 +13,14 @@ router = APIRouter(
     tags=["Comments"]
 )
 
-
 @router.post("/comments")
 def add_comment(
     feature_id: int = Form(...),
     comment: str = Form(...),
-    image: UploadFile | None = File(None),
+    attachment: UploadFile | None = File(
+        None,
+        description="Optional attachment: image (jpg/png/webp), PDF, DOCX, or plain text file."
+    ),
     current_user=Depends(require_roles(CAN_COMMENT))
 ):
     logger.info(f"POST /comments | feature_id={feature_id} | user_id={current_user['user_id']} | role={current_user['role']}")
@@ -26,9 +28,8 @@ def add_comment(
         feature_id=feature_id,
         user_id=current_user["user_id"],
         comment=comment,
-        image=image
+        attachment=attachment
     )
-
 
 @router.get("/features/{feature_id}/comments")
 def list_feature_comments(feature_id: int, current_user=Depends(get_current_user)):
@@ -37,10 +38,9 @@ def list_feature_comments(feature_id: int, current_user=Depends(get_current_user
 
     return get_feature_comments(feature_id)
 
+@router.get("/comments/{comment_id}/attachment")
+def fetch_comment_attachment(comment_id: int, current_user=Depends(get_current_user)):
 
-@router.get("/comments/{comment_id}/image")
-def fetch_comment_image(comment_id: int, current_user=Depends(get_current_user)):
+    logger.info(f"GET /comments/{comment_id}/attachment | user_id={current_user['user_id']}")
 
-    logger.info(f"GET /comments/{comment_id}/image | user_id={current_user['user_id']}")
-
-    return get_comment_image(comment_id)
+    return get_comment_attachment(comment_id)

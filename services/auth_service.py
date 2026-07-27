@@ -4,7 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.database import engine
 from utils.auth_utils import hash_password, verify_password, create_access_token
 from utils.logger import logger
-from utils.exception_handler import (
+from utils.exceptions import (
     BadRequestError,
     UnauthorizedError,
     ServiceUnavailableError,
