@@ -1,352 +1,90 @@
-from sqlalchemy import text, bindparam
+from geoalchemy2 import Geography, Geometry
+from sqlalchemy import cast, func, select
 from sqlalchemy.exc import DataError, SQLAlchemyError
- 
-from database.database import engine
+from sqlalchemy.orm import aliased
+
+from database.database import SessionLocal
+from models.model import Feature
 from utils.logger import logger
-from utils.exceptions import (
-    BadRequestError,
-    UnprocessableEntityError,
-    ServiceUnavailableError,
-)
- 
- 
-# ===================================================
-# UNION FEATURES
-# ===================================================
- 
+from utils.exceptions import BadRequestError, UnprocessableEntityError, ServiceUnavailableError
+
+
+def _run_geometry(statement, error_message):
+    try:
+        with SessionLocal() as db:
+            geometry = db.scalar(statement)
+    except DataError as e:
+        raise UnprocessableEntityError("Invalid geometry data") from e
+    except SQLAlchemyError as e:
+        logger.error(f"Spatial operation failed | error={e}", exc_info=True)
+        raise ServiceUnavailableError(error_message) from e
+    if geometry is None:
+        raise UnprocessableEntityError(error_message.replace("Failed to compute ", "").capitalize() + " could not be computed")
+    return geometry
+
+
 def union_features(feature_ids):
- 
-    logger.info(f"Union requested | feature_ids={feature_ids}")
- 
     if len(feature_ids) < 2:
-        logger.warning(f"Union rejected: fewer than 2 features | feature_ids={feature_ids}")
         raise BadRequestError("At least two features are required for union")
- 
-    try:
-        with engine.connect() as conn:
- 
-            stmt = text("""
-                SELECT ST_AsGeoJSON(
-                    ST_Union(geom)
-                ) AS geometry
-                FROM features
-                WHERE id IN :feature_ids
-            """).bindparams(
-                bindparam("feature_ids", expanding=True)
-            )
- 
-            result = conn.execute(
-                stmt,
-                {
-                    "feature_ids": feature_ids
-                }
-            )
- 
-            row = result.fetchone()
- 
-    except DataError as e:
-        logger.error(f"Data error computing union | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise UnprocessableEntityError("Invalid geometry data") from e
- 
-    except SQLAlchemyError as e:
-        logger.error(f"Unexpected DB error computing union | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to compute union") from e
- 
-    if row is None or row.geometry is None:
-        logger.warning(f"Union could not be computed | feature_ids={feature_ids}")
-        raise UnprocessableEntityError("Union could not be computed")
- 
-    logger.info(f"Union computed | feature_ids={feature_ids}")
- 
-    return {
-        "success": True,
-        "operation": "union",
-        "geometry": row.geometry
-    }
- 
- 
-# ===================================================
-# INTERSECTION FEATURES
-# ===================================================
- 
+    geometry = _run_geometry(
+        select(func.ST_AsGeoJSON(func.ST_Union(Feature.geom))).where(Feature.id.in_(feature_ids)),
+        "Failed to compute union",
+    )
+    return {"success": True, "operation": "union", "geometry": geometry}
+
+
+def _binary_operation(feature_ids, operation, label):
+    if len(feature_ids) != 2:
+        raise BadRequestError(f"{label} requires exactly two features")
+    left, right = aliased(Feature), aliased(Feature)
+    geometry = _run_geometry(
+        select(func.ST_AsGeoJSON(operation(left.geom, right.geom))).where(
+            left.id == feature_ids[0], right.id == feature_ids[1]
+        ),
+        f"Failed to compute {label.lower()}",
+    )
+    return {"success": True, "operation": label.lower().replace(" ", ""), "geometry": geometry}
+
+
 def intersection_features(feature_ids):
- 
-    logger.info(f"Intersection requested | feature_ids={feature_ids}")
- 
-    if len(feature_ids) != 2:
-        logger.warning(f"Intersection rejected: requires exactly 2 features | feature_ids={feature_ids}")
-        raise BadRequestError("Intersection requires exactly two features")
- 
-    try:
-        with engine.connect() as conn:
- 
-            stmt = text("""
-                SELECT ST_AsGeoJSON(
-                    ST_Intersection(f1.geom, f2.geom)
-                ) AS geometry
-                FROM features f1
-                JOIN features f2
-                  ON f1.id != f2.id
-                WHERE f1.id = :id1
-                  AND f2.id = :id2
-            """)
- 
-            result = conn.execute(
-                stmt,
-                {
-                    "id1": feature_ids[0],
-                    "id2": feature_ids[1]
-                }
-            )
- 
-            row = result.fetchone()
- 
-    except DataError as e:
-        logger.error(f"Data error computing intersection | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise UnprocessableEntityError("Invalid geometry data") from e
- 
-    except SQLAlchemyError as e:
-        logger.error(f"Unexpected DB error computing intersection | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to compute intersection") from e
- 
-    if row is None or row.geometry is None:
-        logger.warning(f"Intersection could not be computed | feature_ids={feature_ids}")
-        raise UnprocessableEntityError("Intersection could not be computed")
- 
-    logger.info(f"Intersection computed | feature_ids={feature_ids}")
- 
-    return {
-        "success": True,
-        "operation": "intersection",
-        "geometry": row.geometry
-    }
- 
- 
-# ===================================================
-# DIFFERENCE FEATURES
-# ===================================================
- 
+    return _binary_operation(feature_ids, func.ST_Intersection, "intersection")
+
+
 def difference_features(feature_ids):
- 
-    logger.info(f"Difference requested | feature_ids={feature_ids}")
- 
-    if len(feature_ids) != 2:
-        logger.warning(f"Difference rejected: requires exactly 2 features | feature_ids={feature_ids}")
-        raise BadRequestError("Difference requires exactly two features")
- 
-    try:
-        with engine.connect() as conn:
- 
-            result = conn.execute(
-                text("""
-                    SELECT ST_AsGeoJSON(
-                        ST_Difference(f1.geom, f2.geom)
-                    ) AS geometry
-                    FROM features f1,
-                         features f2
-                    WHERE f1.id = :id1
-                      AND f2.id = :id2
-                """),
-                {
-                    "id1": feature_ids[0],
-                    "id2": feature_ids[1]
-                }
-            )
- 
-            row = result.fetchone()
- 
-    except DataError as e:
-        logger.error(f"Data error computing difference | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise UnprocessableEntityError("Invalid geometry data") from e
- 
-    except SQLAlchemyError as e:
-        logger.error(f"Unexpected DB error computing difference | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to compute difference") from e
- 
-    if row is None or row.geometry is None:
-        logger.warning(f"Difference could not be computed | feature_ids={feature_ids}")
-        raise UnprocessableEntityError("Difference could not be computed")
- 
-    logger.info(f"Difference computed | feature_ids={feature_ids}")
- 
-    return {
-        "success": True,
-        "operation": "difference",
-        "geometry": row.geometry
-    }
- 
- 
-# ===================================================
-# SYMMETRIC DIFFERENCE FEATURES
-# ===================================================
- 
+    return _binary_operation(feature_ids, func.ST_Difference, "difference")
+
+
 def symdifference_features(feature_ids):
- 
-    logger.info(f"Symmetric difference requested | feature_ids={feature_ids}")
- 
-    if len(feature_ids) != 2:
-        logger.warning(f"Symmetric difference rejected: requires exactly 2 features | feature_ids={feature_ids}")
-        raise BadRequestError("Symmetric Difference requires exactly two features")
- 
-    try:
-        with engine.connect() as conn:
- 
-            result = conn.execute(
-                text("""
-                    SELECT ST_AsGeoJSON(
-                        ST_SymDifference(f1.geom, f2.geom)
-                    ) AS geometry
-                    FROM features f1,
-                         features f2
-                    WHERE f1.id = :id1
-                      AND f2.id = :id2
-                """),
-                {
-                    "id1": feature_ids[0],
-                    "id2": feature_ids[1]
-                }
-            )
- 
-            row = result.fetchone()
- 
-    except DataError as e:
-        logger.error(f"Data error computing symmetric difference | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise UnprocessableEntityError("Invalid geometry data") from e
- 
-    except SQLAlchemyError as e:
-        logger.error(f"Unexpected DB error computing symmetric difference | feature_ids={feature_ids} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to compute symmetric difference") from e
- 
-    if row is None or row.geometry is None:
-        logger.warning(f"Symmetric difference could not be computed | feature_ids={feature_ids}")
-        raise UnprocessableEntityError("Symmetric Difference could not be computed")
- 
-    logger.info(f"Symmetric difference computed | feature_ids={feature_ids}")
- 
-    return {
-        "success": True,
-        "operation": "symdifference",
-        "geometry": row.geometry
-    }
- 
- 
-# ===================================================
-# Buffer FEATURE
-# ===================================================
-# FIX (circle border-gap issue): default ST_Buffer quad_segs=8
-# produces a 32-sided polygon per circle. When two such circles are
-# intersected, the intersection boundary is made of new straight
-# edges at the crossing points, which don't line up flush with the
-# coarse original edges — visible as a gap/mismatch on the map.
-# Raising quad_segs to 64 (a 256-sided polygon) makes the
-# approximation dense enough that this is visually imperceptible.
+    return _binary_operation(feature_ids, func.ST_SymDifference, "symdifference")
+
+
 def buffer_feature(feature_id, distance):
- 
-    conn = engine.connect()
- 
-    try:
- 
-        result = conn.execute(
-            text("""
-                SELECT ST_AsGeoJSON(
-                    ST_Buffer(geom::geography, :distance, 256)::geometry
-                ) AS geometry
-                FROM features
-                WHERE id = :feature_id
-            """),
-            {
-                "feature_id": feature_id,
-                "distance": distance
-            }
-        )
- 
-        row = result.fetchone()
- 
-        return {
-            "success": True,
-            "operation": "buffer",
-            "geometry": row.geometry
-        }
- 
-    finally:
-        conn.close()
- 
- 
-# ===================================================
-# Centroid FEATURE
-# ===================================================
- 
+    buffered = cast(
+        func.ST_Buffer(cast(Feature.geom, Geography), distance, 256),
+        Geometry(geometry_type="GEOMETRY", srid=4326),
+    )
+    geometry = _run_geometry(
+        select(func.ST_AsGeoJSON(buffered)).where(Feature.id == feature_id),
+        "Failed to compute buffer",
+    )
+    return {"success": True, "operation": "buffer", "geometry": geometry}
+
+
 def centroid_feature(feature_id):
- 
-    conn = engine.connect()
- 
-    try:
- 
-        result = conn.execute(
-            text("""
-                SELECT ST_AsGeoJSON(
-                    ST_Centroid(geom)
-                ) AS geometry
-                FROM features
-                WHERE id = :feature_id
-            """),
-            {
-                "feature_id": feature_id
-            }
-        )
- 
-        row = result.fetchone()
- 
-        return {
-            "success": True,
-            "operation": "centroid",
-            "geometry": row.geometry
-        }
- 
-    finally:
-        conn.close()
- 
- 
-# ===================================================
-# Convex Hull FEATURE
-# ===================================================
- 
- 
+    geometry = _run_geometry(
+        select(func.ST_AsGeoJSON(func.ST_Centroid(Feature.geom))).where(Feature.id == feature_id),
+        "Failed to compute centroid",
+    )
+    return {"success": True, "operation": "centroid", "geometry": geometry}
+
+
 def convex_hull(feature_ids):
- 
     if len(feature_ids) < 2:
-        return {
-            "success": False,
-            "message": "At least two features are required for convex hull"
-        }
- 
-    conn = engine.connect()
- 
-    try:
- 
-        result = conn.execute(
-            text("""
-                SELECT
-                    ST_AsGeoJSON(
-                        ST_ConvexHull(
-                            ST_Collect(geom)
-                        )
-                    ) AS geometry
-                FROM features
-                WHERE id = ANY(:feature_ids)
-            """),
-            {
-                "feature_ids": feature_ids
-            }
-        )
- 
-        row = result.fetchone()
- 
-        return {
-            "success": True,
-            "operation": "convex_hull",
-            "geometry": row.geometry
-        }
- 
-    finally:
-        conn.close()
+        return {"success": False, "message": "At least two features are required for convex hull"}
+    geometry = _run_geometry(
+        select(func.ST_AsGeoJSON(func.ST_ConvexHull(func.ST_Collect(Feature.geom)))).where(
+            Feature.id.in_(feature_ids)
+        ),
+        "Failed to compute convex hull",
+    )
+    return {"success": True, "operation": "convex_hull", "geometry": geometry}

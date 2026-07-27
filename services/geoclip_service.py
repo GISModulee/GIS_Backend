@@ -40,7 +40,7 @@ def _validate_top_k(top_k: int | None) -> int:
         return settings.GEOCLIP_TOP_K
 
     if top_k < MIN_TOP_K or top_k > MAX_TOP_K:
-        raise BadRequestError(
+        raise UnprocessableEntityError(
             f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K} (got {top_k})."
         )
 

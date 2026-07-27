@@ -1,9 +1,12 @@
 import json
 
-from sqlalchemy import text
+from datetime import datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
-from database.database import engine
+from database.database import SessionLocal
+from models.model import Feature
 from schemas.feature_schema import FeatureCreate
 from utils.logger import logger
 from utils.exceptions import (
@@ -46,6 +49,21 @@ def _row_to_feature_dict(row):
     }
 
 
+def _feature_select():
+    return select(
+        Feature.id,
+        Feature.layer_id,
+        Feature.name,
+        Feature.geometry_type,
+        Feature.radius,
+        func.ST_AsGeoJSON(Feature.geom).label("geometry"),
+        Feature.properties,
+        Feature.created_by,
+        Feature.created_at,
+        Feature.updated_at,
+    )
+
+
 # ===================================================
 # CREATE FEATURE
 # ===================================================
@@ -84,125 +102,60 @@ def create_feature(feature, created_by: int | None = None):
     if feature.geometry_type == "Circle":
         if not feature.center or "lat" not in feature.center or "lng" not in feature.center:
             logger.warning(f"Feature creation rejected: Circle missing center | layer_id={layer_id}")
-            raise BadRequestError("Circle features require a 'center' with lat/lng")
+            raise UnprocessableEntityError("Circle features require a 'center' with lat/lng")
         if feature.radius is None:
             logger.warning(f"Feature creation rejected: Circle missing radius | layer_id={layer_id}")
-            raise BadRequestError("Circle features require a 'radius'")
+            raise UnprocessableEntityError("Circle features require a 'radius'")
     else:
         if not feature.geometry:
             logger.warning(
                 f"Feature creation rejected: missing geometry | "
                 f"layer_id={layer_id} | geometry_type={feature.geometry_type}"
             )
-            raise BadRequestError("'geometry' is required for this geometry_type")
+            raise UnprocessableEntityError("'geometry' is required for this geometry_type")
 
     # ---------------------------------
     # 4. INSERT FEATURE
     # ---------------------------------
     try:
-        with engine.begin() as conn:
+        with SessionLocal.begin() as db:
 
             if feature.geometry_type == "Circle":
 
-                result = conn.execute(
-                    text("""
-                        INSERT INTO features
-                        (
-                            layer_id,
-                            name,
-                            geom,
-                            geometry_type,
-                            radius,
-                            properties,
-                            created_by
-                        )
-                        VALUES
-                        (
-                            :layer_id,
-                            :name,
-
-                            ST_Transform(
-                                ST_Buffer(
-                                    ST_Transform(
-                                        ST_SetSRID(
-                                            ST_Point(:lng, :lat),
-                                            4326
-                                        ),
-                                        3857
-                                    ),
-                                    :radius,
-                                    256
-                                ),
-                                4326
+                geometry = func.ST_Transform(
+                    func.ST_Buffer(
+                        func.ST_Transform(
+                            func.ST_SetSRID(
+                                func.ST_Point(feature.center["lng"], feature.center["lat"]), 4326
                             ),
-
-                            'Circle',
-
-                            :radius,
-
-                            CAST(:properties AS jsonb),
-
-                            :created_by
-                        )
-
-                        RETURNING id
-                    """),
-                    {
-                        "layer_id": layer_id,
-                        "name": feature.name,
-                        "lat": feature.center["lat"],
-                        "lng": feature.center["lng"],
-                        "radius": feature.radius,
-                        "properties": json.dumps(feature.properties),
-                        "created_by": created_by
-                    }
+                            3857,
+                        ),
+                        feature.radius,
+                        256,
+                    ),
+                    4326,
                 )
-
             else:
-
-                result = conn.execute(
-                    text("""
-                        INSERT INTO features
-                        (
-                            layer_id,
-                            name,
-                            geom,
-                            geometry_type,
-                            radius,
-                            properties,
-                            created_by
-                        )
-                        VALUES
-                        (
-                            :layer_id,
-                            :name,
-                            ST_SetSRID(
-                                ST_GeomFromGeoJSON(:geometry),
-                                4326
-                            ),
-                            :geometry_type,
-                            NULL,
-                            CAST(:properties AS jsonb),
-                            :created_by
-                        )
-
-                        RETURNING id
-                    """),
-                    {
-                        "layer_id": layer_id,
-                        "name": feature.name,
-                        "geometry": json.dumps(feature.geometry),
-                        "geometry_type": feature.geometry_type,
-                        "properties": json.dumps(feature.properties),
-                        "created_by": created_by
-                    }
+                geometry = func.ST_SetSRID(
+                    func.ST_GeomFromGeoJSON(json.dumps(feature.geometry)), 4326
                 )
-
-            feature_id = result.scalar()
+            new_feature = Feature(
+                layer_id=layer_id,
+                case_id=case_id,
+                name=feature.name,
+                geom=geometry,
+                geometry_type=feature.geometry_type,
+                radius=feature.radius if feature.geometry_type == "Circle" else None,
+                properties=feature.properties,
+                created_by=created_by,
+            )
+            db.add(new_feature)
+            db.flush()
+            feature_id = new_feature.id
 
     except IntegrityError as e:
         logger.error(f"Integrity error creating feature | layer_id={layer_id} | error={e}", exc_info=True)
-        raise BadRequestError("Invalid reference — the specified layer_id does not exist") from e
+        raise NotFoundError("The specified layer does not exist") from e
 
     except DataError as e:
         logger.error(f"Data error creating feature (bad geometry?) | layer_id={layer_id} | error={e}", exc_info=True)
@@ -231,24 +184,8 @@ def get_features():
     logger.info("Fetching all features")
 
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT
-                        id,
-                        layer_id,
-                        name,
-                        geometry_type,
-                        radius,
-                        ST_AsGeoJSON(geom) AS geometry,
-                        properties,
-                        created_by,
-                        created_at,
-                        updated_at
-                    FROM features
-                    ORDER BY id
-                """)
-            )
+        with SessionLocal() as db:
+            result = db.execute(_feature_select().order_by(Feature.id))
             rows = list(result)
 
     except SQLAlchemyError as e:
@@ -267,25 +204,9 @@ def get_layer_features(layer_id):
     logger.info(f"Fetching features for layer | layer_id={layer_id}")
 
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT
-                        id,
-                        layer_id,
-                        name,
-                        geometry_type,
-                        radius,
-                        ST_AsGeoJSON(geom) AS geometry,
-                        properties,
-                        created_by,
-                        created_at,
-                        updated_at
-                    FROM features
-                    WHERE layer_id = :layer_id
-                    ORDER BY id
-                """),
-                {"layer_id": layer_id}
+        with SessionLocal() as db:
+            result = db.execute(
+                _feature_select().where(Feature.layer_id == layer_id).order_by(Feature.id)
             )
             rows = list(result)
 
@@ -305,26 +226,10 @@ def get_feature(feature_id):
     logger.info(f"Fetching feature | feature_id={feature_id}")
 
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT
-                        id,
-                        layer_id,
-                        name,
-                        geometry_type,
-                        radius,
-                        ST_AsGeoJSON(geom) AS geometry,
-                        properties,
-                        created_by,
-                        created_at,
-                        updated_at
-                    FROM features
-                    WHERE id = :id
-                """),
-                {"id": feature_id}
-            )
-            row = result.fetchone()
+        with SessionLocal() as db:
+            row = db.execute(
+                _feature_select().where(Feature.id == feature_id)
+            ).one_or_none()
 
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch feature | feature_id={feature_id} | error={e}", exc_info=True)
@@ -345,38 +250,25 @@ def update_feature(feature_id, feature):
     logger.info(f"Updating feature | feature_id={feature_id}")
 
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    UPDATE features
-                    SET
-                        layer_id = :layer_id,
-                        name = :name,
-                        geom = ST_SetSRID(ST_GeomFromGeoJSON(:geometry), 4326),
-                        properties = CAST(:properties AS jsonb),
-                        updated_at = NOW()
-                    WHERE id = :id
-                """),
-                {
-                    "id": feature_id,
-                    "layer_id": feature.layer_id,
-                    "name": feature.name,
-                    "geometry": json.dumps(feature.geometry),
-                    "properties": json.dumps(feature.properties)
-                }
-            )
-
-            if result.rowcount == 0:
+        with SessionLocal.begin() as db:
+            existing = db.get(Feature, feature_id)
+            if existing is None:
                 logger.warning(f"Update feature failed: not found | feature_id={feature_id}")
                 raise NotFoundError("Feature not found")
+            existing.layer_id = feature.layer_id
+            existing.name = feature.name
+            existing.geom = func.ST_SetSRID(
+                func.ST_GeomFromGeoJSON(json.dumps(feature.geometry)), 4326
+            )
+            existing.properties = feature.properties
+            existing.updated_at = datetime.now()
 
     except NotFoundError:
         raise
 
     except IntegrityError as e:
         logger.error(f"Integrity error updating feature | feature_id={feature_id} | error={e}", exc_info=True)
-        raise BadRequestError("Invalid layer_id — referenced layer does not exist") from e
+        raise NotFoundError("The specified layer does not exist") from e
 
     except DataError as e:
         logger.error(f"Data error updating feature (bad geometry?) | feature_id={feature_id} | error={e}", exc_info=True)
@@ -403,45 +295,19 @@ def patch_feature(feature_id, feature):
     logger.info(f"Patching feature | feature_id={feature_id}")
 
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT name, properties
-                    FROM features
-                    WHERE id = :id
-                """),
-                {"id": feature_id}
-            )
-
-            row = result.fetchone()
-
-            if row is None:
+        with SessionLocal.begin() as db:
+            existing = db.get(Feature, feature_id)
+            if existing is None:
                 logger.warning(f"Patch feature failed: not found | feature_id={feature_id}")
                 raise NotFoundError("Feature not found")
 
-            name = feature.name if feature.name is not None else row.name
-
-            properties = row.properties or {}
-
+            if feature.name is not None:
+                existing.name = feature.name
+            properties = dict(existing.properties or {})
             if feature.properties is not None:
                 properties.update(feature.properties)
-
-            conn.execute(
-                text("""
-                    UPDATE features
-                    SET
-                        name = :name,
-                        properties = CAST(:properties AS jsonb),
-                        updated_at = NOW()
-                    WHERE id = :id
-                """),
-                {
-                    "id": feature_id,
-                    "name": name,
-                    "properties": json.dumps(properties)
-                }
-            )
+            existing.properties = properties
+            existing.updated_at = datetime.now()
 
     except NotFoundError:
         raise
@@ -467,19 +333,12 @@ def delete_feature(feature_id):
     logger.warning(f"Deleting feature | feature_id={feature_id}")
 
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    DELETE FROM features
-                    WHERE id = :id
-                """),
-                {"id": feature_id}
-            )
-
-            if result.rowcount == 0:
+        with SessionLocal.begin() as db:
+            existing = db.get(Feature, feature_id)
+            if existing is None:
                 logger.warning(f"Delete feature failed: not found | feature_id={feature_id}")
                 raise NotFoundError("Feature not found")
+            db.delete(existing)
 
     except NotFoundError:
         raise

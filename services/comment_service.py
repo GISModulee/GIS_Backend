@@ -1,9 +1,10 @@
 from fastapi import UploadFile
 from fastapi.responses import Response
-from sqlalchemy import text
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from database.database import engine
+from database.database import SessionLocal
+from models.model import Comment, User
 from utils.config import settings
 from utils.logger import logger
 from utils.exceptions import NotFoundError, ServiceUnavailableError
@@ -45,41 +46,18 @@ def create_comment(feature_id, user_id, comment, attachment: UploadFile | None =
         attachment_content_type = detected_mime
 
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    INSERT INTO comments
-                    (
-                        feature_id,
-                        user_id,
-                        comment,
-                        attachment_data,
-                        attachment_filename,
-                        attachment_content_type
-                    )
-                    VALUES
-                    (
-                        :feature_id,
-                        :user_id,
-                        :comment,
-                        :attachment_data,
-                        :attachment_filename,
-                        :attachment_content_type
-                    )
-                    RETURNING id
-                """),
-                {
-                    "feature_id": feature_id,
-                    "user_id": user_id,
-                    "comment": comment,
-                    "attachment_data": attachment_data,
-                    "attachment_filename": attachment_filename,
-                    "attachment_content_type": attachment_content_type,
-                }
+        with SessionLocal.begin() as db:
+            new_comment = Comment(
+                feature_id=feature_id,
+                user_id=user_id,
+                comment=comment,
+                attachment_data=attachment_data,
+                attachment_filename=attachment_filename,
+                attachment_content_type=attachment_content_type,
             )
-
-            comment_id = result.scalar()
+            db.add(new_comment)
+            db.flush()
+            comment_id = new_comment.id
 
     except SQLAlchemyError as e:
         logger.error(f"Failed to create comment | feature_id={feature_id} | error={e}", exc_info=True)
@@ -112,33 +90,25 @@ def get_feature_comments(feature_id):
     logger.info(f"Fetching comments | feature_id={feature_id}")
 
     try:
-        with engine.connect() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT
-                        c.id,
-                        c.feature_id,
-                        c.user_id,
-                        u.full_name AS user_full_name,
-                        u.username AS user_username,
-                        u.role AS user_role,
-                        c.comment,
-                        c.attachment_filename,
-                        c.attachment_content_type,
-                        c.created_at
-                    FROM comments c
-                    LEFT JOIN users u ON u.id = c.user_id
-                    WHERE c.feature_id = :feature_id
-                    ORDER BY c.created_at ASC
-                """),
-                {
-                    "feature_id": feature_id
-                }
+        with SessionLocal() as db:
+            result = db.execute(
+                select(
+                    Comment.id,
+                    Comment.feature_id,
+                    Comment.user_id,
+                    User.full_name.label("user_full_name"),
+                    User.username.label("user_username"),
+                    User.role.label("user_role"),
+                    Comment.comment,
+                    Comment.attachment_filename,
+                    Comment.attachment_content_type,
+                    Comment.created_at,
+                )
+                .outerjoin(User, User.id == Comment.user_id)
+                .where(Comment.feature_id == feature_id)
+                .order_by(Comment.created_at.asc())
             )
-
             comments = []
-
             for row in result:
                 comments.append({
                     "id": row.id,
@@ -170,23 +140,12 @@ def update_comment(comment_id, comment):
     logger.info(f"Updating comment | comment_id={comment_id}")
 
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    UPDATE comments
-                    SET comment = :comment
-                    WHERE id = :id
-                """),
-                {
-                    "id": comment_id,
-                    "comment": comment.comment
-                }
-            )
-
-            if result.rowcount == 0:
+        with SessionLocal.begin() as db:
+            existing = db.get(Comment, comment_id)
+            if existing is None:
                 logger.warning(f"Update comment failed: not found | comment_id={comment_id}")
                 raise NotFoundError("Comment not found")
+            existing.comment = comment.comment
 
     except NotFoundError:
         raise
@@ -212,21 +171,12 @@ def delete_comment(comment_id):
     logger.info(f"Deleting comment | comment_id={comment_id}")
 
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    DELETE FROM comments
-                    WHERE id = :id
-                """),
-                {
-                    "id": comment_id
-                }
-            )
-
-            if result.rowcount == 0:
+        with SessionLocal.begin() as db:
+            existing = db.get(Comment, comment_id)
+            if existing is None:
                 logger.warning(f"Delete comment failed: not found | comment_id={comment_id}")
                 raise NotFoundError("Comment not found")
+            db.delete(existing)
 
     except NotFoundError:
         raise
@@ -258,20 +208,14 @@ def get_comment_attachment(comment_id):
     logger.info(f"Fetching comment attachment | comment_id={comment_id}")
 
     try:
-        with engine.connect() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT attachment_data, attachment_filename, attachment_content_type
-                    FROM comments
-                    WHERE id = :id
-                """),
-                {
-                    "id": comment_id
-                }
-            )
-
-            row = result.fetchone()
+        with SessionLocal() as db:
+            row = db.execute(
+                select(
+                    Comment.attachment_data,
+                    Comment.attachment_filename,
+                    Comment.attachment_content_type,
+                ).where(Comment.id == comment_id)
+            ).one_or_none()
 
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch comment attachment | comment_id={comment_id} | error={e}", exc_info=True)

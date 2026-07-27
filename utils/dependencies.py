@@ -4,15 +4,18 @@ from fastapi import Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from utils.auth_utils import decode_access_token
-from utils.exception_handler import UnauthorizedError, ForbiddenError
+from utils.exceptions import UnauthorizedError, ForbiddenError
 from utils.logger import logger
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials | None = Depends(security)
 ):
+    if credentials is None:
+        raise UnauthorizedError("Authentication credentials were not provided.")
+
     token = credentials.credentials
 
     payload = decode_access_token(token)

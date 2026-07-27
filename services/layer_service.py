@@ -1,914 +1,212 @@
-from sqlalchemy import text
+from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from database.database import engine
+from database.database import SessionLocal
+from models.model import Layer
 from utils.logger import logger
-from utils.exceptions import (
-    NotFoundError,
-    BadRequestError,
-    ServiceUnavailableError,
-)
+from utils.exceptions import NotFoundError, BadRequestError, ConflictError, ServiceUnavailableError
 
 
-# ===================================================
-# CREATE LAYER
-# ===================================================
+def _dict(layer):
+    return {key: getattr(layer, key) for key in (
+        "id", "case_id", "name", "layer_type", "visible", "created_at"
+    )}
+
+
+def _duplicate(db, case_id, name, exclude_id=None):
+    stmt = select(Layer.id).where(Layer.case_id == case_id, Layer.name == name)
+    if exclude_id is not None:
+        stmt = stmt.where(Layer.id != exclude_id)
+    return db.scalar(stmt.limit(1))
+
+
+def _duplicate_error(name, import_layer=False):
+    suffix = "Pass a different 'layer_name' on the import request to disambiguate." if import_layer else "Choose a different name."
+    return ConflictError(f"A layer named '{name}' already exists in this case. {suffix}")
+
+
+def _integrity_error(error, case_id, name, import_layer=False):
+    if getattr(getattr(error, "orig", None), "pgcode", None) == "23505":
+        raise _duplicate_error(name, import_layer) from error
+    raise NotFoundError(f"Cannot create layer: case_id {case_id} does not exist.") from error
+
 
 def create_layer(layer: dict):
-
     logger.info(f"Creating layer | case_id={layer.get('case_id')} | name={layer.get('name')}")
-
-    # ---------------------------------------------------------------
-    # PAPER-OVER for frontend duplicate-layer bug:
-    # The frontend currently fires a POST /layers with layer_type
-    # "group" (client-generated name, e.g. "Auto Layer 1") right
-    # around the same time it triggers feature creation, which
-    # separately auto-creates a real "auto" layer with the SAME name
-    # for the SAME case_id via create_untitled_layer(). That's two
-    # layer rows for one user action.
-    #
-    # Rather than insert a second row for "group", reuse whichever
-    # layer already exists for this case_id + name (the "auto" layer,
-    # if it's already been created). If nothing matches yet, fall
-    # through to a normal insert so this never silently drops a
-    # legitimate request.
-    #
-    # NOTE: this hides the symptom, not the root cause — the frontend
-    # should stop calling POST /layers with layer_type "group" before
-    # drawing a feature. Remove this block once that's fixed.
-    # ---------------------------------------------------------------
-    if layer.get("layer_type") == "group":
-
-        try:
-            with engine.connect() as conn:
-                existing = conn.execute(
-                    text("""
-                        SELECT id
-                        FROM layers
-                        WHERE case_id = :case_id
-                          AND name = :name
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                    """),
-                    {
-                        "case_id": layer.get("case_id"),
-                        "name": layer.get("name")
-                    }
-                ).fetchone()
-
-        except SQLAlchemyError as e:
-            logger.error(
-                f"Failed to check for reusable layer | case_id={layer.get('case_id')} | "
-                f"name={layer.get('name')} | error={e}",
-                exc_info=True
-            )
-            raise ServiceUnavailableError("Failed to create layer") from e
-
-        if existing:
-            logger.info(
-                f"Reusing existing layer instead of creating duplicate 'group' layer | "
-                f"layer_id={existing.id} | case_id={layer.get('case_id')} | name={layer.get('name')}"
-            )
-            return {
-                "success": True,
-                "layer_id": existing.id,
-                "message": "Reused existing layer"
-            }
-
-    # ---------------------------------------------------------------
-    # No duplicate layer names within the same case. This is a
-    # friendly pre-check for a clear error message — the actual
-    # guarantee against a race (two requests creating the same name at
-    # the same instant) is the uq_layers_case_id_name unique constraint
-    # in models/model.py, caught below via IntegrityError.
-    # ---------------------------------------------------------------
     try:
-        with engine.connect() as conn:
-            duplicate = conn.execute(
-                text("""
-                    SELECT id
-                    FROM layers
-                    WHERE case_id = :case_id
-                      AND name = :name
-                    LIMIT 1
-                """),
-                {
-                    "case_id": layer.get("case_id"),
-                    "name": layer.get("name")
-                }
-            ).fetchone()
-
-    except SQLAlchemyError as e:
-        logger.error(
-            f"Failed to check for duplicate layer name | case_id={layer.get('case_id')} | "
-            f"name={layer.get('name')} | error={e}",
-            exc_info=True
-        )
-        raise ServiceUnavailableError("Failed to create layer") from e
-
-    if duplicate:
-        logger.warning(
-            f"Layer creation rejected: duplicate name in case | "
-            f"case_id={layer.get('case_id')} | name={layer.get('name')}"
-        )
-        raise BadRequestError(
-            f"A layer named '{layer.get('name')}' already exists in this case. "
-            f"Choose a different name."
-        )
-
-    try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    INSERT INTO layers
-                    (
-                        case_id,
-                        name,
-                        layer_type,
-                        visible
-                    )
-                    VALUES
-                    (
-                        :case_id,
-                        :name,
-                        :layer_type,
-                        :visible
-                    )
-                    RETURNING id
-                """),
-                {
-                    "case_id": layer["case_id"],
-                    "name": layer["name"],
-                    "layer_type": layer["layer_type"],
-                    "visible": layer["visible"]
-                }
-            )
-
-            layer_id = result.scalar()
-
+        with SessionLocal.begin() as db:
+            existing_id = _duplicate(db, layer.get("case_id"), layer.get("name"))
+            if existing_id is not None:
+                if layer.get("layer_type") == "group":
+                    return {"success": True, "layer_id": existing_id, "message": "Reused existing layer"}
+                raise _duplicate_error(layer.get("name"))
+            record = Layer(**{key: layer[key] for key in ("case_id", "name", "layer_type", "visible")})
+            db.add(record)
+            db.flush()
+            layer_id = record.id
+    except (BadRequestError, ConflictError):
+        raise
     except IntegrityError as e:
-        # pgcode 23505 = unique_violation (the race the pre-check above
-        # couldn't fully close), 23503 = foreign_key_violation (bad
-        # case_id). Distinguish so the error message is actually correct
-        # instead of always blaming case_id.
-        pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
-
-        if pgcode == "23505":
-            logger.warning(
-                f"Layer creation rejected: duplicate name in case (race) | "
-                f"case_id={layer.get('case_id')} | name={layer.get('name')}"
-            )
-            raise BadRequestError(
-                f"A layer named '{layer.get('name')}' already exists in this case. "
-                f"Choose a different name."
-            ) from e
-
-        logger.error(
-            f"Integrity error creating layer | case_id={layer.get('case_id')} | error={e}",
-            exc_info=True
-        )
-        raise BadRequestError(
-            f"Cannot create layer: case_id {layer.get('case_id')} does not exist."
-        ) from e
-
+        _integrity_error(e, layer.get("case_id"), layer.get("name"))
     except SQLAlchemyError as e:
-        logger.error(f"Failed to create layer | case_id={layer.get('case_id')} | error={e}", exc_info=True)
+        logger.error(f"Failed to create layer | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to create layer") from e
+    return {"success": True, "layer_id": layer_id, "message": "Layer created successfully"}
 
-    logger.info(f"Layer created | layer_id={layer_id} | case_id={layer.get('case_id')}")
-
-    return {
-        "success": True,
-        "layer_id": layer_id,
-        "message": "Layer created successfully"
-    }
-
-
-# ===================================================
-# GET IMPORT LAYER BY FILE HASH (duplicate-import detection)
-# ===================================================
 
 def get_import_layer_by_hash(case_id: int, file_hash: str):
-    """
-    Returns the existing import layer dict if this exact file was
-    already imported into this case, otherwise None. Used by
-    upload_service.extract_kml to avoid creating a duplicate layer +
-    re-importing all its features when the same file is uploaded twice.
-    """
-
-    logger.info(f"Checking for duplicate import | case_id={case_id} | file_hash={file_hash}")
-
     try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT id, case_id, name, layer_type, visible, created_at
-                    FROM layers
-                    WHERE case_id = :case_id
-                      AND file_hash = :file_hash
-                      AND layer_type = 'import'
-                    LIMIT 1
-                """),
-                {"case_id": case_id, "file_hash": file_hash}
-            )
-            row = result.fetchone()
-
+        with SessionLocal() as db:
+            layer = db.scalar(select(Layer).where(
+                Layer.case_id == case_id, Layer.file_hash == file_hash, Layer.layer_type == "import"
+            ).limit(1))
+            return _dict(layer) if layer else None
     except SQLAlchemyError as e:
-        logger.error(f"Failed to check for duplicate import | case_id={case_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to check for duplicate import") from e
 
-    if row is None:
-        return None
-
-    return {
-        "id": row.id,
-        "case_id": row.case_id,
-        "name": row.name,
-        "layer_type": row.layer_type,
-        "visible": row.visible,
-        "created_at": row.created_at,
-    }
-
-
-# ===================================================
-# CREATE IMPORT LAYER (with file_hash recorded)
-# ===================================================
 
 def create_import_layer(case_id: int, name: str, file_hash: str):
-
-    logger.info(f"Creating import layer | case_id={case_id} | name={name} | file_hash={file_hash}")
-
-    # Same duplicate-name rule as create_layer(). This matters more
-    # here than anywhere else: the default name is derived from the
-    # uploaded file's basename, so importing two DIFFERENT files that
-    # happen to share a filename (e.g. two separate "sample.kml"
-    # uploads with different content/hash) would previously silently
-    # create two layers both named "sample". Now it's rejected —
-    # pass an explicit layer_name on the /import request to disambiguate.
     try:
-        with engine.connect() as conn:
-            duplicate = conn.execute(
-                text("""
-                    SELECT id
-                    FROM layers
-                    WHERE case_id = :case_id
-                      AND name = :name
-                    LIMIT 1
-                """),
-                {"case_id": case_id, "name": name}
-            ).fetchone()
-
-    except SQLAlchemyError as e:
-        logger.error(
-            f"Failed to check for duplicate layer name | case_id={case_id} | name={name} | error={e}",
-            exc_info=True
-        )
-        raise ServiceUnavailableError("Failed to create layer") from e
-
-    if duplicate:
-        logger.warning(f"Import layer creation rejected: duplicate name in case | case_id={case_id} | name={name}")
-        raise BadRequestError(
-            f"A layer named '{name}' already exists in this case. "
-            f"Pass a different 'layer_name' on the import request to disambiguate."
-        )
-
-    try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    INSERT INTO layers
-                    (
-                        case_id,
-                        name,
-                        layer_type,
-                        visible,
-                        file_hash
-                    )
-                    VALUES
-                    (
-                        :case_id,
-                        :name,
-                        'import',
-                        TRUE,
-                        :file_hash
-                    )
-                    RETURNING id
-                """),
-                {
-                    "case_id": case_id,
-                    "name": name,
-                    "file_hash": file_hash
-                }
-            )
-
-            layer_id = result.scalar()
-
+        with SessionLocal.begin() as db:
+            if _duplicate(db, case_id, name) is not None:
+                raise _duplicate_error(name, True)
+            record = Layer(case_id=case_id, name=name, layer_type="import", visible=True, file_hash=file_hash)
+            db.add(record)
+            db.flush()
+            layer_id = record.id
+    except (BadRequestError, ConflictError):
+        raise
     except IntegrityError as e:
-        pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
-
-        if pgcode == "23505":
-            logger.warning(f"Import layer creation rejected: duplicate name in case (race) | case_id={case_id} | name={name}")
-            raise BadRequestError(
-                f"A layer named '{name}' already exists in this case. "
-                f"Pass a different 'layer_name' on the import request to disambiguate."
-            ) from e
-
-        logger.error(f"Integrity error creating import layer | case_id={case_id} | error={e}", exc_info=True)
-        raise BadRequestError(f"Cannot create layer: case_id {case_id} does not exist.") from e
-
+        _integrity_error(e, case_id, name, True)
     except SQLAlchemyError as e:
-        logger.error(f"Failed to create import layer | case_id={case_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to create layer") from e
+    return {"success": True, "layer_id": layer_id, "message": "Layer created successfully"}
 
-    logger.info(f"Import layer created | layer_id={layer_id} | case_id={case_id}")
-
-    return {
-        "success": True,
-        "layer_id": layer_id,
-        "message": "Layer created successfully"
-    }
-
-
-# ===================================================
-# CREATE AUTO LAYER
-# ===================================================
 
 def create_untitled_layer(case_id: int):
-
-    logger.info(f"Creating auto layer | case_id={case_id}")
-
     try:
-        with engine.begin() as conn:
-
-            # FIX (issue #3 in review): SELECT MAX(...) followed by a
-            # separate INSERT is not atomic — two concurrent draw
-            # requests for the same case could both read the same max
-            # and insert two layers named e.g. "Auto Layer 3". A
-            # transaction-scoped Postgres advisory lock, keyed on
-            # case_id, serializes this: the second concurrent caller
-            # blocks here until the first commits (or rolls back),
-            # then sees the first's row when it computes its own MAX.
-            # The lock releases automatically at transaction end.
-            conn.execute(
-                text("SELECT pg_advisory_xact_lock(:key)"),
-                {"key": case_id}
-            )
-
-            result = conn.execute(
-                text("""
-                    SELECT COALESCE(
-                        MAX(
-                            CAST(
-                                REPLACE(name, 'Auto Layer ', '') AS INTEGER
-                            )
-                        ),
-                        0
-                    )
-                    FROM layers
-                    WHERE case_id = :case_id
-                      AND layer_type = 'auto'
-                      AND name LIKE 'Auto Layer %'
-                """),
-                {
-                    "case_id": case_id
-                }
-            )
-
-            max_number = result.scalar()
-
-            # The unique (case_id, name) constraint means a manually
-            # created layer that happens to be named e.g. "Auto Layer 3"
-            # (any layer_type — the MAX(...) above only scans
-            # layer_type='auto' rows) can still collide with the next
-            # auto-generated name. Bounded retry: on a collision, just
-            # try the next number instead of failing the whole
-            # feature-draw action the caller is in the middle of.
-            layer_id = None
-            attempts = 0
-            max_attempts = 10
-
-            while layer_id is None and attempts < max_attempts:
-
-                attempts += 1
-                next_number = max_number + attempts
-                layer_name = f"Auto Layer {next_number}"
-
-                savepoint = conn.begin_nested()
+        with SessionLocal.begin() as db:
+            db.execute(select(func.pg_advisory_xact_lock(case_id)))
+            suffix = cast(func.replace(Layer.name, "Auto Layer ", ""), Integer)
+            max_number = db.scalar(select(func.coalesce(func.max(suffix), 0)).where(
+                Layer.case_id == case_id,
+                Layer.layer_type == "auto",
+                Layer.name.like("Auto Layer %"),
+            ))
+            for offset in range(1, 11):
+                record = Layer(case_id=case_id, name=f"Auto Layer {max_number + offset}", layer_type="auto", visible=True)
                 try:
-                    result = conn.execute(
-                        text("""
-                            INSERT INTO layers
-                            (
-                                case_id,
-                                name,
-                                layer_type,
-                                visible
-                            )
-                            VALUES
-                            (
-                                :case_id,
-                                :name,
-                                'auto',
-                                TRUE
-                            )
-                            RETURNING id
-                        """),
-                        {
-                            "case_id": case_id,
-                            "name": layer_name
-                        }
-                    )
-                    layer_id = result.scalar()
-                    savepoint.commit()
-
+                    with db.begin_nested():
+                        db.add(record)
+                        db.flush()
+                    return record.id
                 except IntegrityError as e:
-                    pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
-                    savepoint.rollback()
-
-                    if pgcode != "23505":
+                    if getattr(getattr(e, "orig", None), "pgcode", None) != "23505":
                         raise
-
-                    logger.warning(
-                        f"Auto layer name collided, retrying with next number | "
-                        f"case_id={case_id} | attempted_name={layer_name} | attempt={attempts}"
-                    )
-
-            if layer_id is None:
-                logger.error(
-                    f"Failed to auto-create layer after {max_attempts} name collisions | case_id={case_id}"
-                )
-                raise ServiceUnavailableError(
-                    "Failed to auto-create layer: too many name collisions. Try again."
-                )
-
+            raise ServiceUnavailableError("Failed to auto-create layer: too many name collisions. Try again.")
     except ServiceUnavailableError:
         raise
-
     except SQLAlchemyError as e:
-        logger.error(f"Failed to auto-create layer | case_id={case_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to auto-create layer") from e
 
-    logger.info(f"Auto layer created | layer_id={layer_id} | case_id={case_id}")
-
-    # IMPORTANT: feature_service.py expects only the layer ID
-    return layer_id
-
-
-# ===================================================
-# GET ALL LAYERS
-# ===================================================
 
 def get_layers():
-
-    logger.info("Fetching all layers")
-
     try:
-        with engine.connect() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT
-                        id,
-                        case_id,
-                        name,
-                        layer_type,
-                        visible,
-                        created_at
-                    FROM layers
-                    ORDER BY id
-                """)
-            )
-
-            return [
-                {
-                    "id": row.id,
-                    "case_id": row.case_id,
-                    "name": row.name,
-                    "layer_type": row.layer_type,
-                    "visible": row.visible,
-                    "created_at": row.created_at
-                }
-                for row in result
-            ]
-
+        with SessionLocal() as db:
+            return [_dict(item) for item in db.scalars(select(Layer).order_by(Layer.id)).all()]
     except SQLAlchemyError as e:
-        logger.error(f"Failed to fetch layers | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to fetch layers") from e
 
 
-# ===================================================
-# GET SINGLE LAYER
-# ===================================================
-
 def get_layer(layer_id: int):
-    """
-    Kept returning None on not-found (unchanged contract) — routers do
-    their own `if layer is None: raise NotFoundError(...)` before
-    calling update/patch/delete. Change this to raise NotFoundError
-    directly only if you also update those callers.
-    """
-
-    logger.info(f"Fetching layer | layer_id={layer_id}")
-
     try:
-        with engine.connect() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT
-                        id,
-                        case_id,
-                        name,
-                        layer_type,
-                        visible,
-                        created_at
-                    FROM layers
-                    WHERE id = :id
-                """),
-                {"id": layer_id}
-            )
-
-            row = result.fetchone()
-
-            if not row:
-                return None
-
-            return {
-                "id": row.id,
-                "case_id": row.case_id,
-                "name": row.name,
-                "layer_type": row.layer_type,
-                "visible": row.visible,
-                "created_at": row.created_at
-            }
-
+        with SessionLocal() as db:
+            item = db.get(Layer, layer_id)
+            return _dict(item) if item else None
     except SQLAlchemyError as e:
-        logger.error(f"Failed to fetch layer | layer_id={layer_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to fetch layer") from e
 
 
-# ===================================================
-# UPDATE LAYER
-# ===================================================
-
 def update_layer(layer_id: int, layer: dict):
-
-    logger.info(f"Updating layer | layer_id={layer_id}")
-
-    # Same duplicate-name rule as create_layer(), excluding this layer
-    # itself so renaming a layer to its own current name doesn't
-    # falsely trip the check.
     try:
-        with engine.connect() as conn:
-            duplicate = conn.execute(
-                text("""
-                    SELECT id
-                    FROM layers
-                    WHERE case_id = :case_id
-                      AND name = :name
-                      AND id != :id
-                    LIMIT 1
-                """),
-                {
-                    "id": layer_id,
-                    "case_id": layer["case_id"],
-                    "name": layer["name"]
-                }
-            ).fetchone()
-
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to check for duplicate layer name | layer_id={layer_id} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to update layer") from e
-
-    if duplicate:
-        logger.warning(
-            f"Layer update rejected: duplicate name in case | "
-            f"layer_id={layer_id} | case_id={layer['case_id']} | name={layer['name']}"
-        )
-        raise BadRequestError(
-            f"A layer named '{layer['name']}' already exists in this case. "
-            f"Choose a different name."
-        )
-
-    try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    UPDATE layers
-                    SET
-                        case_id = :case_id,
-                        name = :name,
-                        layer_type = :layer_type,
-                        visible = :visible
-                    WHERE id = :id
-                """),
-                {
-                    "id": layer_id,
-                    "case_id": layer["case_id"],
-                    "name": layer["name"],
-                    "layer_type": layer["layer_type"],
-                    "visible": layer["visible"]
-                }
-            )
-
-            if result.rowcount == 0:
-                logger.warning(f"Update layer failed: not found | layer_id={layer_id}")
+        with SessionLocal.begin() as db:
+            item = db.get(Layer, layer_id)
+            if item is None:
                 raise NotFoundError("Layer not found")
-
-    except NotFoundError:
+            if _duplicate(db, layer["case_id"], layer["name"], layer_id) is not None:
+                raise _duplicate_error(layer["name"])
+            for key in ("case_id", "name", "layer_type", "visible"):
+                setattr(item, key, layer[key])
+    except (NotFoundError, BadRequestError, ConflictError):
         raise
-
     except IntegrityError as e:
-        pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
-
-        if pgcode == "23505":
-            logger.warning(f"Layer update rejected: duplicate name in case (race) | layer_id={layer_id}")
-            raise BadRequestError(
-                f"A layer named '{layer['name']}' already exists in this case. "
-                f"Choose a different name."
-            ) from e
-
-        logger.error(f"Integrity error updating layer | layer_id={layer_id} | error={e}", exc_info=True)
-        raise BadRequestError(f"Cannot update layer: case_id {layer.get('case_id')} does not exist.") from e
-
+        _integrity_error(e, layer.get("case_id"), layer.get("name"))
     except SQLAlchemyError as e:
-        logger.error(f"Failed to update layer | layer_id={layer_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to update layer") from e
+    return {"success": True, "message": "Layer updated successfully"}
 
-    logger.info(f"Layer updated | layer_id={layer_id}")
-
-    return {
-        "success": True,
-        "message": "Layer updated successfully"
-    }
-
-
-# ===================================================
-# DELETE LAYER
-# ===================================================
 
 def delete_layer(layer_id):
-
-    logger.warning(f"Deleting layer | layer_id={layer_id}")
-
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT case_id, name, layer_type
-                    FROM layers
-                    WHERE id = :id
-                """),
-                {"id": layer_id}
-            )
-
-            row = result.fetchone()
-
-            if row is None:
-                logger.warning(f"Delete layer failed: not found | layer_id={layer_id}")
+        with SessionLocal.begin() as db:
+            item = db.get(Layer, layer_id)
+            if item is None:
                 raise NotFoundError("Layer not found")
-
-            case_id = row.case_id
-            layer_name = row.name
-            layer_type = row.layer_type
-
+            case_id, name, layer_type = item.case_id, item.name, item.layer_type
             deleted_number = None
-
             if layer_type == "auto":
                 try:
-                    deleted_number = int(layer_name.replace("Auto Layer ", ""))
-                except (ValueError, AttributeError) as e:
-                    logger.warning(
-                        f"Could not parse auto layer number for renumbering | "
-                        f"layer_id={layer_id} | name={layer_name} | error={e}"
-                    )
-                    deleted_number = None
-
-            conn.execute(
-                text("""
-                    DELETE FROM layers
-                    WHERE id = :id
-                """),
-                {"id": layer_id}
-            )
-
+                    deleted_number = int(name.replace("Auto Layer ", ""))
+                except (ValueError, AttributeError):
+                    pass
+            db.delete(item)
+            db.flush()
             if deleted_number is not None:
-
-                result = conn.execute(
-                    text("""
-                        SELECT id, name
-                        FROM layers
-                        WHERE case_id = :case_id
-                          AND layer_type = 'auto'
-                    """),
-                    {"case_id": case_id}
-                )
-
-                layers = result.fetchall()
-
-                for layer in layers:
-
+                remaining = db.scalars(select(Layer).where(
+                    Layer.case_id == case_id, Layer.layer_type == "auto"
+                ).order_by(Layer.name)).all()
+                for candidate in remaining:
                     try:
-                        current_number = int(
-                            layer.name.replace("Auto Layer ", "")
-                        )
-
-                        if current_number > deleted_number:
-
-                            conn.execute(
-                                text("""
-                                    UPDATE layers
-                                    SET name = :name
-                                    WHERE id = :id
-                                """),
-                                {
-                                    "id": layer.id,
-                                    "name": f"Auto Layer {current_number - 1}"
-                                }
-                            )
-
-                    except (ValueError, AttributeError) as e:
-                        logger.warning(
-                            f"Skipping renumber for layer_id={layer.id} | "
-                            f"name={layer.name} | error={e}"
-                        )
-
+                        number = int(candidate.name.replace("Auto Layer ", ""))
+                        if number > deleted_number:
+                            candidate.name = f"Auto Layer {number - 1}"
+                    except (ValueError, AttributeError):
+                        continue
     except NotFoundError:
         raise
-
     except SQLAlchemyError as e:
-        logger.error(f"Failed to delete layer | layer_id={layer_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to delete layer") from e
+    return {"success": True, "message": "Layer deleted successfully"}
 
-    logger.info(f"Layer deleted | layer_id={layer_id}")
-
-    return {
-        "success": True,
-        "message": "Layer deleted successfully"
-    }
-
-
-# ===================================================
-# GET LAYERS BY CASE
-# ===================================================
 
 def get_case_layers(case_id: int):
-
-    logger.info(f"Fetching layers for case | case_id={case_id}")
-
     try:
-        with engine.connect() as conn:
-
-            result = conn.execute(
-                text("""
-                    SELECT
-                        id,
-                        case_id,
-                        name,
-                        layer_type,
-                        visible,
-                        created_at
-                    FROM layers
-                    WHERE case_id = :case_id
-                    ORDER BY id
-                """),
-                {"case_id": case_id}
-            )
-
-            return [
-                {
-                    "id": row.id,
-                    "case_id": row.case_id,
-                    "name": row.name,
-                    "layer_type": row.layer_type,
-                    "visible": row.visible,
-                    "created_at": row.created_at
-                }
-                for row in result
-            ]
-
+        with SessionLocal() as db:
+            items = db.scalars(select(Layer).where(Layer.case_id == case_id).order_by(Layer.id)).all()
+            return [_dict(item) for item in items]
     except SQLAlchemyError as e:
-        logger.error(f"Failed to fetch layers for case | case_id={case_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to fetch layers") from e
 
 
-# ===================================================
-# PATCH LAYER
-# ===================================================
-
 def patch_layer(layer_id: int, layer: dict):
-
-    updates = []
-    values = {"id": layer_id}
-
-    if layer.get("name") is not None:
-
-        # Same duplicate-name rule as create_layer()/update_layer(), but
-        # patch_layer only receives `name` — not `case_id` — so the
-        # layer's current case_id has to be looked up first. If the
-        # layer doesn't exist at all, this lookup just returns None and
-        # the check is skipped; the UPDATE below still correctly raises
-        # NotFoundError via rowcount == 0.
-        try:
-            with engine.connect() as conn:
-                current = conn.execute(
-                    text("SELECT case_id FROM layers WHERE id = :id"),
-                    {"id": layer_id}
-                ).fetchone()
-
-                if current is not None:
-                    duplicate = conn.execute(
-                        text("""
-                            SELECT id
-                            FROM layers
-                            WHERE case_id = :case_id
-                              AND name = :name
-                              AND id != :id
-                            LIMIT 1
-                        """),
-                        {
-                            "id": layer_id,
-                            "case_id": current.case_id,
-                            "name": layer["name"]
-                        }
-                    ).fetchone()
-
-                    if duplicate:
-                        logger.warning(
-                            f"Layer patch rejected: duplicate name in case | "
-                            f"layer_id={layer_id} | case_id={current.case_id} | name={layer['name']}"
-                        )
-                        raise BadRequestError(
-                            f"A layer named '{layer['name']}' already exists in this case. "
-                            f"Choose a different name."
-                        )
-
-        except BadRequestError:
-            raise
-
-        except SQLAlchemyError as e:
-            logger.error(f"Failed to check for duplicate layer name | layer_id={layer_id} | error={e}", exc_info=True)
-            raise ServiceUnavailableError("Failed to update layer") from e
-
-        updates.append("name = :name")
-        values["name"] = layer["name"]
-
-    if layer.get("layer_type") is not None:
-        updates.append("layer_type = :layer_type")
-        values["layer_type"] = layer["layer_type"]
-
-    if layer.get("visible") is not None:
-        updates.append("visible = :visible")
-        values["visible"] = layer["visible"]
-
+    updates = {key: value for key, value in layer.items() if key in {"name", "layer_type", "visible"} and value is not None}
     if not updates:
-        logger.info(f"Patch layer skipped, no fields provided | layer_id={layer_id}")
         raise BadRequestError("No fields provided to update")
-
-    query = f"""
-        UPDATE layers
-        SET {", ".join(updates)}
-        WHERE id = :id
-    """
-
-    logger.info(f"Patching layer | layer_id={layer_id} | fields={list(values.keys())}")
-
     try:
-        with engine.begin() as conn:
-
-            result = conn.execute(text(query), values)
-
-            if result.rowcount == 0:
-                logger.warning(f"Patch layer failed: not found | layer_id={layer_id}")
+        with SessionLocal.begin() as db:
+            item = db.get(Layer, layer_id)
+            if item is None:
                 raise NotFoundError("Layer not found")
-
-    except NotFoundError:
+            if "name" in updates and _duplicate(db, item.case_id, updates["name"], layer_id) is not None:
+                raise _duplicate_error(updates["name"])
+            for key, value in updates.items():
+                setattr(item, key, value)
+    except (NotFoundError, BadRequestError, ConflictError):
         raise
-
     except IntegrityError as e:
-        pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
-
-        if pgcode == "23505":
-            logger.warning(f"Layer patch rejected: duplicate name in case (race) | layer_id={layer_id}")
-            raise BadRequestError(
-                f"A layer named '{values.get('name')}' already exists in this case. "
-                f"Choose a different name."
-            ) from e
-
-        logger.error(f"Integrity error patching layer | layer_id={layer_id} | error={e}", exc_info=True)
+        if getattr(getattr(e, "orig", None), "pgcode", None) == "23505":
+            raise _duplicate_error(updates.get("name")) from e
         raise ServiceUnavailableError("Failed to update layer") from e
-
     except SQLAlchemyError as e:
-        logger.error(f"Failed to patch layer | layer_id={layer_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to update layer") from e
-
-    logger.info(f"Layer patched | layer_id={layer_id} | fields={list(values.keys())}")
-
-    return {
-        "success": True,
-        "message": "Layer updated successfully"
-    }
+    return {"success": True, "message": "Layer updated successfully"}

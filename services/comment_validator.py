@@ -28,7 +28,7 @@ class CommentAttachmentValidator:
         ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
             logger.warning(f"Attachment validation rejected: extension '{ext}' not allowed | filename={filename}")
-            raise BadRequestError(
+            raise UnsupportedMediaTypeError(
                 f"Extension '{ext}' is not allowed. Allowed: {sorted(ALLOWED_ATTACHMENT_EXTENSIONS)}"
             )
         return ext
@@ -71,7 +71,7 @@ class CommentAttachmentValidator:
     def validate_size(content: bytes, max_bytes: int):
         if len(content) == 0:
             logger.warning("Attachment validation rejected: uploaded file is empty")
-            raise PayloadTooLargeError("Uploaded file is empty.")
+            raise BadRequestError("Uploaded file is empty.")
         if len(content) > max_bytes:
             max_mb = max_bytes // (1024 * 1024)
             logger.warning(f"Attachment validation rejected: file too large | size={len(content)} | max_mb={max_mb}")

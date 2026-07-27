@@ -16,7 +16,7 @@ from services.layer_service import (
     get_import_layer_by_hash,
 )
 from utils.logger import logger
-from utils.exceptions import BadRequestError, UnprocessableEntityError
+from utils.exceptions import BadRequestError, NotImplementedError_, UnsupportedMediaTypeError, UnprocessableEntityError
 
 
 # ===================================================
@@ -87,8 +87,6 @@ def _check_duplicate_import(case_id, file_hash, source_label):
         "imported_features": 0,
         "message": "This file was already imported into this case — no new layer created."
     }
-
-
 def _resolve_layer_name(layer_name, filename):
     return layer_name if layer_name else os.path.splitext(filename)[0]
 
@@ -193,7 +191,7 @@ def _ingest_features(case_id, layer_id, feature_iter, created_by):
 
 class BaseExtractor:
     def extract(self, *, file_path, filename, case_id, layer_name, created_by):
-        raise NotImplementedError(
+        raise NotImplementedError_(
             "Subclasses of BaseExtractor must override extract()"
         )
 
@@ -419,7 +417,7 @@ async def process_upload(
 
     extractor = EXTRACTOR_REGISTRY.get(extension)
     if extractor is None:
-        raise BadRequestError(f"Unsupported file type: {extension}")
+        raise UnsupportedMediaTypeError(f"Unsupported file type: {extension}")
 
     data = extractor.extract(
         file_path=file_path,
@@ -436,4 +434,3 @@ async def process_upload(
         "file_type": extension,
         "data": data
     }
- 
