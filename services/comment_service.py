@@ -4,21 +4,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Comment, User
+from models.model import Comment, User, Feature
 from utils.config import settings
 from utils.logger import logger
 from utils.exceptions import NotFoundError, ServiceUnavailableError
 from services.comment_validator import CommentAttachmentValidator
 
-
-# ===================================================
-# CREATE COMMENT
-# ===================================================
-# `attachment` (renamed from `image`) now accepts image (jpg/png/webp),
-# PDF, DOCX, or plain text — validated the same way GeoCLIP uploads
-# are (extension check + magic-byte content check), not just
-# rubber-stamped as "image/jpeg" like the old code did regardless of
-# what was actually uploaded.
 
 def create_comment(feature_id, user_id, comment, attachment: UploadFile | None = None):
 
@@ -47,6 +38,11 @@ def create_comment(feature_id, user_id, comment, attachment: UploadFile | None =
 
     try:
         with SessionLocal.begin() as db:
+            feature_exists = db.scalar(select(Feature.id).where(Feature.id == feature_id))
+            if feature_exists is None:
+                logger.warning(f"Create comment failed: feature not found | feature_id={feature_id}")
+                raise NotFoundError("Feature not found")
+
             new_comment = Comment(
                 feature_id=feature_id,
                 user_id=user_id,
@@ -58,6 +54,9 @@ def create_comment(feature_id, user_id, comment, attachment: UploadFile | None =
             db.add(new_comment)
             db.flush()
             comment_id = new_comment.id
+
+    except NotFoundError:
+        raise
 
     except SQLAlchemyError as e:
         logger.error(f"Failed to create comment | feature_id={feature_id} | error={e}", exc_info=True)
@@ -84,6 +83,11 @@ def create_comment(feature_id, user_id, comment, attachment: UploadFile | None =
 # CAN_COMMENT can add to it — nothing scopes a comment to only its
 # author, so this was already structurally multi-user before, it just
 # didn't tell you WHO said what. Now it does.
+#
+# FIX: previously ran the query with no check that feature_id exists.
+# A nonexistent feature_id returned an empty list `[]` — indistinguishable
+# from a real feature with zero comments. Now verifies the feature
+# exists first and raises NotFoundError (404) if not.
 
 def get_feature_comments(feature_id):
 
@@ -91,6 +95,11 @@ def get_feature_comments(feature_id):
 
     try:
         with SessionLocal() as db:
+            feature_exists = db.scalar(select(Feature.id).where(Feature.id == feature_id))
+            if feature_exists is None:
+                logger.warning(f"Get feature comments failed: feature not found | feature_id={feature_id}")
+                raise NotFoundError("Feature not found")
+
             result = db.execute(
                 select(
                     Comment.id,
@@ -124,6 +133,9 @@ def get_feature_comments(feature_id):
                     "created_at": row.created_at
                 })
 
+    except NotFoundError:
+        raise
+
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch comments | feature_id={feature_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError("Failed to fetch comments") from e
@@ -134,6 +146,9 @@ def get_feature_comments(feature_id):
 # ===================================================
 # UPDATE COMMENT
 # ===================================================
+# NOTE: not currently wired to any route in api/comments.py — flagging
+# as dead code per your request rather than silently changing routing.
+# Exception handling here is already correct and needs no fix.
 
 def update_comment(comment_id, comment):
 
@@ -165,6 +180,9 @@ def update_comment(comment_id, comment):
 # ===================================================
 # DELETE COMMENT
 # ===================================================
+# NOTE: not currently wired to any route in api/comments.py — flagging
+# as dead code per your request rather than silently changing routing.
+# Exception handling here is already correct and needs no fix.
 
 def delete_comment(comment_id):
 

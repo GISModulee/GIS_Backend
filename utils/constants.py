@@ -1,8 +1,3 @@
-"""Application-specific error messages.
-
-HTTP status codes come from ``fastapi.status``; they are not duplicated here.
-"""
-
 DETAIL_BAD_REQUEST = "Invalid request"
 DETAIL_UNAUTHORIZED = "Not authenticated"
 DETAIL_FORBIDDEN = "Permission denied"

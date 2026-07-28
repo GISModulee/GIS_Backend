@@ -218,9 +218,18 @@ def upload_image(
 # ===================================================
 # GET IMAGES OF A LAYER (PAGINATED)
 # ===================================================
+# FIX: previously ran the query with no check that layer_id exists.
+# A nonexistent layer_id returned an empty list `[]` — indistinguishable
+# from a real layer with zero images. Now verifies the layer exists
+# first and raises NotFoundError (404) if not.
 def get_images_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> List[ImageRecord]:
 
     logger.info(f"Fetching images for layer | layer_id={layer_id} | limit={limit} | offset={offset}")
+
+    layer_exists = db.query(Layer.id).filter(Layer.id == layer_id).first()
+    if layer_exists is None:
+        logger.warning(f"Get images by layer failed: layer not found | layer_id={layer_id}")
+        raise NotFoundError("Layer not found")
 
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
@@ -238,9 +247,18 @@ def get_images_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> 
 # ===================================================
 # GET FEATURES OF A LAYER (GEOJSON)
 # ===================================================
+# FIX: previously ran the query with no check that layer_id exists.
+# A nonexistent layer_id returned an empty FeatureCollection —
+# indistinguishable from a real layer with zero features. Now verifies
+# the layer exists first and raises NotFoundError (404) if not.
 def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> dict:
 
     logger.info(f"Fetching features for layer | layer_id={layer_id} | limit={limit} | offset={offset}")
+
+    layer_exists = db.query(Layer.id).filter(Layer.id == layer_id).first()
+    if layer_exists is None:
+        logger.warning(f"Get features by layer failed: layer not found | layer_id={layer_id}")
+        raise NotFoundError("Layer not found")
 
     limit = max(1, min(limit, 2000))
     offset = max(0, offset)

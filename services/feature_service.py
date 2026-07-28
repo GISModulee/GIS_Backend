@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Feature
+from models.model import Feature, Layer
 from schemas.feature_schema import FeatureCreate
 from utils.logger import logger
 from utils.exceptions import (
@@ -198,6 +198,10 @@ def get_features():
 # ===================================================
 # GET FEATURES OF A LAYER
 # ===================================================
+# FIX: previously ran the query with no check that layer_id exists.
+# A nonexistent layer_id returned an empty list `[]` — indistinguishable
+# from a real layer with zero features. Now verifies the layer exists
+# first and raises NotFoundError (404) if not.
 
 def get_layer_features(layer_id):
 
@@ -205,10 +209,18 @@ def get_layer_features(layer_id):
 
     try:
         with SessionLocal() as db:
+            layer_exists = db.scalar(select(Layer.id).where(Layer.id == layer_id))
+            if layer_exists is None:
+                logger.warning(f"Get layer features failed: layer not found | layer_id={layer_id}")
+                raise NotFoundError("Layer not found")
+
             result = db.execute(
                 _feature_select().where(Feature.layer_id == layer_id).order_by(Feature.id)
             )
             rows = list(result)
+
+    except NotFoundError:
+        raise
 
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch features for layer | layer_id={layer_id} | error={e}", exc_info=True)

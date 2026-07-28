@@ -2,7 +2,7 @@ from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Layer
+from models.model import Layer, Case
 from utils.logger import logger
 from utils.exceptions import NotFoundError, BadRequestError, ConflictError, ServiceUnavailableError
 
@@ -182,8 +182,14 @@ def delete_layer(layer_id):
 def get_case_layers(case_id: int):
     try:
         with SessionLocal() as db:
+            case_exists = db.scalar(select(Case.id).where(Case.id == case_id))
+            if case_exists is None:
+                logger.warning(f"Get case layers failed: case not found | case_id={case_id}")
+                raise NotFoundError("Case not found")
             items = db.scalars(select(Layer).where(Layer.case_id == case_id).order_by(Layer.id)).all()
             return [_dict(item) for item in items]
+    except NotFoundError:
+        raise
     except SQLAlchemyError as e:
         raise ServiceUnavailableError("Failed to fetch layers") from e
 
