@@ -21,6 +21,9 @@ from api.uploads import router as upload_router
 from api.geoclip import router as geoclip_router
 from api.auth import router as auth_router
 from api.vector import router as vector_router
+from api.geo_search import router as geo_search_router
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up GeoIntelligence API")
@@ -75,6 +78,7 @@ app.include_router(comment_router)
 app.include_router(case_router)
 app.include_router(upload_router)
 app.include_router(vector_router)
+app.include_router(geo_search_router)
 
 
 @app.get("/health", tags=["System"])

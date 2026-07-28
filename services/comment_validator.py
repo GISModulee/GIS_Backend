@@ -28,9 +28,7 @@ class CommentAttachmentValidator:
         ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in ALLOWED_ATTACHMENT_EXTENSIONS:
             logger.warning(f"Attachment validation rejected: extension '{ext}' not allowed | filename={filename}")
-            raise UnsupportedMediaTypeError(
-                f"Extension '{ext}' is not allowed. Allowed: {sorted(ALLOWED_ATTACHMENT_EXTENSIONS)}"
-            )
+            raise UnsupportedMediaTypeError("Unsupported media type")
         return ext
 
     @staticmethod
@@ -45,7 +43,7 @@ class CommentAttachmentValidator:
             detected_mime = magic.from_buffer(content, mime=True)
         except Exception as e:
             logger.error(f"Magic byte detection failed for '{filename}': {e}", exc_info=True)
-            raise UnsupportedMediaTypeError("Unable to determine file type from content.") from e
+            raise UnsupportedMediaTypeError("Unsupported media type") from e
 
         logger.debug(f"Detected MIME type '{detected_mime}' for attachment '{filename}'")
 
@@ -60,10 +58,7 @@ class CommentAttachmentValidator:
             logger.warning(
                 f"Attachment validation rejected: content type '{detected_mime}' not allowed | filename={filename}"
             )
-            raise UnsupportedMediaTypeError(
-                f"File content is '{detected_mime}', which is not an allowed attachment type. "
-                f"Allowed: image (jpg/png/webp), PDF, DOCX, or plain text."
-            )
+            raise UnsupportedMediaTypeError("Unsupported media type")
 
         return ALLOWED_ATTACHMENT_MIME_TYPES[detected_mime], detected_mime
 
