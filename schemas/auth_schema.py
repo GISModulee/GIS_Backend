@@ -48,8 +48,11 @@ class RegisterUser(BaseModel):
 
 
 class LoginUser(BaseModel):
-    email: EmailStr
-    password: str = Field(..., min_length=8, max_length=128)
+    # Login verifies credentials against the stored user. Registration
+    # policy (email format and password strength) must not reject a
+    # credential attempt before authentication can return a uniform 401.
+    email: str
+    password: str
 
 
 class UserResponse(BaseModel):

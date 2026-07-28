@@ -26,9 +26,7 @@ class FileValidator:
         ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
         if ext not in ALLOWED_EXTENSIONS:
             logger.warning(f"File validation rejected: extension '{ext}' not allowed | filename={filename}")
-            raise UnsupportedMediaTypeError(
-                f"Extension '{ext}' is not allowed. Allowed: {sorted(ALLOWED_EXTENSIONS)}"
-            )
+            raise UnsupportedMediaTypeError("Unsupported media type")
         return ext
 
     @staticmethod

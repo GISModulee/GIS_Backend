@@ -10,6 +10,17 @@ class GeoCLIPService:
         self._loaded = False
         self._lock = threading.Lock()
 
+    def _apply_transformers_compatibility(self):
+        """Normalize CLIP image features across Transformers 4 and 5."""
+        clip_model = self.model.image_encoder.CLIP
+        original_get_image_features = clip_model.get_image_features
+
+        def get_image_features_tensor(*args, **kwargs):
+            output = original_get_image_features(*args, **kwargs)
+            return getattr(output, "pooler_output", output)
+
+        clip_model.get_image_features = get_image_features_tensor
+
     def load_model(self):
         if self._loaded:
             logger.warning("GeoCLIP model already loaded — skipping.")
@@ -18,6 +29,7 @@ class GeoCLIPService:
         logger.info("Loading GeoCLIP model...")
         try:
             self.model = GeoCLIP()
+            self._apply_transformers_compatibility()
             self._loaded = True
             logger.info("GeoCLIP model loaded successfully.")
         except Exception as e:

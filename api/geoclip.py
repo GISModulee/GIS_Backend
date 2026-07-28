@@ -9,18 +9,16 @@ from schemas.geoclip_schema import (
     ImageResponse,
     ImageUploadResponse,
     LayerActionResponse,
-    LayerRenameRequest,
 )
 from services.geoclip_service import (
     delete_layer as delete_layer_service,
     get_features_by_layer as get_features_by_layer_service,
     get_image as get_image_service,
     get_images_by_layer as get_images_by_layer_service,
-    rename_layer as rename_layer_service,
     upload_image as upload_image_service,
 )
 from utils.dependencies import get_current_user, require_roles
-from utils.roles import CAN_UPLOAD, CAN_WRITE, CAN_DELETE_OPERATIONAL
+from utils.roles import CAN_UPLOAD, CAN_DELETE_OPERATIONAL
 from utils.logger import logger
 
 router = APIRouter()
@@ -114,17 +112,3 @@ def delete_layer(
 ):
     logger.warning(f"DELETE /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
     return delete_layer_service(layer_id, db)
-
-
-@router.patch(
-    "/layers/{layer_id}",
-    response_model=LayerActionResponse,
-)
-def rename_layer(
-    layer_id: int,
-    body: LayerRenameRequest,
-    db: Annotated[Session, Depends(get_db)],
-    current_user=Depends(require_roles(CAN_WRITE)),
-):
-    logger.info(f"PATCH /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']} | new_name={body.name}")
-    return rename_layer_service(layer_id, body.name, db)

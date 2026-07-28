@@ -14,6 +14,7 @@ from utils.logger import logger
 from utils.exceptions import (
     NotFoundError,
     BadRequestError,
+    ConflictError,
     ServiceUnavailableError,
     UnprocessableEntityError,
 )
@@ -336,8 +337,36 @@ def rename_layer(layer_id: int, new_name: str, db: Session) -> dict:
         logger.warning(f"Layer not found | layer_id={layer_id}")
         raise NotFoundError("Layer not found")
 
+    duplicate = (
+        db.query(Layer.id)
+        .filter(
+            Layer.case_id == layer.case_id,
+            Layer.name == new_name,
+            Layer.id != layer_id,
+        )
+        .first()
+    )
+    if duplicate is not None:
+        logger.warning(
+            f"Layer rename rejected: duplicate name in case | "
+            f"layer_id={layer_id} | case_id={layer.case_id} | name={new_name}"
+        )
+        raise ConflictError(
+            f"A layer named '{new_name}' already exists in this case. "
+            "Choose a different name."
+        )
+
     layer.name = new_name
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        if getattr(getattr(e, "orig", None), "pgcode", None) == "23505":
+            raise ConflictError(
+                f"A layer named '{new_name}' already exists in this case. "
+                "Choose a different name."
+            ) from e
+        raise
 
     logger.info(f"Layer renamed | id={layer_id} | new_name={new_name}")
     return {"id": layer_id, "name": new_name, "status": "renamed"}
