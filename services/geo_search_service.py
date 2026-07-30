@@ -127,7 +127,6 @@ class GeoSearchService:
             primary_area_terms=primary_terms,
             discovered_area_terms=places,
             context_terms=context_terms,
-            query_is_geographically_constrained=bool(context_terms and search_terms),
             user_terms=request.keywords,
             start_date=effective_start,
             end_date=effective_end,
@@ -844,6 +843,33 @@ class GeoSearchService:
         pattern = r"(?<!\w)" + r"\s+".join(words) + r"(?!\w)"
         return re.search(pattern, text) is not None
 
+    @staticmethod
+    def _geographic_evidence_strength(
+        primary_matches: list[str],
+        discovered_matches: list[str],
+        context_matches: list[str],
+        primary_area_terms: list[str],
+    ) -> int:
+        """Return 0=none, 1=ambiguous, 2=credible, 3=strong evidence."""
+        local_matches = list(dict.fromkeys(
+            primary_matches + discovered_matches
+        ))
+        if local_matches and context_matches:
+            return 3
+        if len(local_matches) >= 2:
+            return 3
+        if context_matches:
+            return 2
+
+        administrative_terms = {
+            term.casefold() for term in primary_area_terms[1:]
+        }
+        if any(term.casefold() in administrative_terms for term in local_matches):
+            return 2
+        if any(len(term.split()) > 1 for term in local_matches):
+            return 2
+        return 1 if local_matches else 0
+
     @classmethod
     def _rank_filter_and_deduplicate(
         cls,
@@ -852,7 +878,6 @@ class GeoSearchService:
         primary_area_terms: list[str],
         discovered_area_terms: list[str],
         context_terms: list[str],
-        query_is_geographically_constrained: bool,
         user_terms: list[str],
         start_date: datetime | None,
         end_date: datetime | None,
@@ -880,18 +905,27 @@ class GeoSearchService:
             context_matches = [
                 term for term in context_terms if cls._contains_term(text, term)
             ]
-            has_explicit_location_match = bool(
-                primary_matches or discovered_matches
+            user_matches = sum(
+                cls._contains_term(text, term) for term in user_terms
             )
-            if not has_explicit_location_match and not query_is_geographically_constrained:
+            if user_terms and not user_matches:
+                continue
+            evidence_strength = cls._geographic_evidence_strength(
+                primary_matches,
+                discovered_matches,
+                context_matches,
+                primary_area_terms,
+            )
+            if evidence_strength < 2:
                 continue
             matched = list(dict.fromkeys(
                 primary_matches + discovered_matches + context_matches
             ))
-            user_matches = sum(
-                cls._contains_term(text, term) for term in user_terms
+            relevance = min(
+                100,
+                45 + evidence_strength * 10 + len(matched) * 5
+                + user_matches * 5,
             )
-            relevance = min(100, 55 + len(matched) * 10 + user_matches * 5)
             normalized_title = " ".join(str(item["title"]).casefold().split())
             dedupe_value = normalized_title or item["url"] or item["id"]
             dedupe_key = hashlib.sha256(dedupe_value.encode("utf-8")).hexdigest()
@@ -903,10 +937,6 @@ class GeoSearchService:
                 trust_score=95 if item["provider"] == "government" else 75 if item["provider"] == "gdelt" else 70,
                 location_evidence=(
                     [f"{term} mentioned in result" for term in matched]
-                    if matched
-                    else [
-                        "Provider query constrained to selected area and administrative context"
-                    ]
                 ),
             )
             existing = candidates.get(dedupe_key)
