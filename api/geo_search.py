@@ -21,8 +21,8 @@ router = APIRouter(
 async def search_news(request: GeoSearchRequest) -> GeoSearchResponse:
     """Search current news relevant to a supplied geographic area."""
     logger.info(
-        "Geo news search requested | geometry=%s | max_results=%s",
-        request.single_shape.type if request.single_shape else "vector_operation",
+        "Geo news search requested | feature_id=%s | max_results=%s",
+        request.feature_id,
         request.max_results,
     )
     return await GeoSearchService.execute_news_search(request)

@@ -1,46 +1,19 @@
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 
-Longitude = Annotated[float, Field(ge=-180, le=180)]
-Latitude = Annotated[float, Field(ge=-90, le=90)]
-
-
-class GeometryInput(BaseModel):
-    type: Literal["Point", "LineString", "Polygon", "Circle", "Rectangle"]
-    coordinates: list
-    radius: float | None = Field(default=None, gt=0, le=100_000)
-
-    @model_validator(mode="after")
-    def validate_shape_fields(self):
-        if self.type == "Circle" and self.radius is None:
-            raise ValueError("radius is required for Circle geometry")
-        if self.type not in {"Circle", "LineString"} and self.radius is not None:
-            raise ValueError("radius is supported only for Circle and LineString")
-        return self
-
-
-class VectorOperationInput(BaseModel):
-    shape_a: GeometryInput
-    shape_b: GeometryInput
-    operation: Literal["union", "intersection", "difference"]
-
-
 class GeoSearchRequest(BaseModel):
-    single_shape: GeometryInput | None = None
-    vector_op: VectorOperationInput | None = None
+    feature_id: int = Field(..., gt=0)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     start_date: datetime | None = None
     end_date: datetime | None = None
-    max_results: int = Field(default=50, ge=1, le=100)
+    max_results: int = Field(default=10, ge=1, le=50)
     h3_resolution: int = Field(default=7, ge=3, le=10)
 
     @model_validator(mode="after")
     def validate_request(self):
-        if (self.single_shape is None) == (self.vector_op is None):
-            raise ValueError("provide exactly one of single_shape or vector_op")
         cleaned = []
         seen = set()
         for keyword in self.keywords:

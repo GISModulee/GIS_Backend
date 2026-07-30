@@ -35,11 +35,15 @@ def _row_to_feature_dict(row):
         logger.error(f"Malformed geometry JSON for feature_id={row.id} | error={e}")
         geometry = None
 
+    geometry_type = row.geometry_type
+    if geometry and geometry.get("type") in {"Point", "LineString"}:
+        geometry_type = geometry["type"]
+
     return {
         "id": row.id,
         "layer_id": row.layer_id,
         "name": row.name,
-        "geometry_type": row.geometry_type,
+        "geometry_type": geometry_type,
         "radius": row.radius,
         "geometry": geometry,
         "properties": row.properties,
@@ -64,6 +68,15 @@ def _feature_select():
     )
 
 
+def _resolved_geometry_type(feature):
+    """Use the actual GeoJSON type for points and lines only."""
+    geometry = feature.geometry or {}
+    actual_type = geometry.get("type")
+    if actual_type in {"Point", "LineString"}:
+        return actual_type
+    return feature.geometry_type
+
+
 # ===================================================
 # CREATE FEATURE
 # ===================================================
@@ -75,8 +88,10 @@ def _feature_select():
 
 def create_feature(feature, created_by: int | None = None):
 
+    geometry_type = _resolved_geometry_type(feature)
+
     logger.info(
-        f"Creating feature | geometry_type={feature.geometry_type} | "
+        f"Creating feature | geometry_type={geometry_type} | "
         f"case_id={feature.case_id} | layer_id={feature.layer_id} | created_by={created_by}"
     )
 
@@ -144,7 +159,7 @@ def create_feature(feature, created_by: int | None = None):
                 case_id=case_id,
                 name=feature.name,
                 geom=geometry,
-                geometry_type=feature.geometry_type,
+                geometry_type=geometry_type,
                 radius=feature.radius if feature.geometry_type == "Circle" else None,
                 properties=feature.properties,
                 created_by=created_by,
@@ -272,6 +287,7 @@ def update_feature(feature_id, feature):
             existing.geom = func.ST_SetSRID(
                 func.ST_GeomFromGeoJSON(json.dumps(feature.geometry)), 4326
             )
+            existing.geometry_type = _resolved_geometry_type(feature)
             existing.properties = feature.properties
             existing.updated_at = datetime.now()
 
