@@ -9,9 +9,8 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import quote, urlparse
 
-import h3
 import httpx
-from shapely.geometry import Point, mapping, shape
+from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import explain_validity
 from sqlalchemy import func, select
@@ -82,7 +81,6 @@ class GeoSearchService:
     ) -> GeoSearchResponse:
         started_at = time.perf_counter()
         geometry = await run_in_threadpool(cls._feature_geometry, request.feature_id)
-        h3_cells = cls._h3_cells(geometry, request.h3_resolution)
         area, place_result = await asyncio.gather(
             cls._area_context(geometry),
             cls._discover_places(geometry),
@@ -192,7 +190,6 @@ class GeoSearchService:
         return GeoSearchResponse(
             status=aggregate_status,
             total_results=len(items),
-            h3_cells_count=len(h3_cells),
             execution_time_seconds=round(time.perf_counter() - started_at, 3),
             area=area,
             sources=sources,
@@ -253,14 +250,6 @@ class GeoSearchService:
         if (max_lon - min_lon) * (max_lat - min_lat) > cls.MAX_AREA_SQUARE_DEGREES:
             raise BadRequestError("Search area is too large; submit a smaller geometry.")
         return geometry
-
-    @staticmethod
-    def _h3_cells(geometry: BaseGeometry, resolution: int) -> list[str]:
-        try:
-            return sorted(h3.geo_to_cells(mapping(geometry), resolution))
-        except Exception as exc:
-            logger.warning("H3 coverage failed | error=%s", exc)
-            return []
 
     @classmethod
     async def _discover_places(

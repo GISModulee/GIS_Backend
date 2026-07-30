@@ -10,7 +10,6 @@ class GeoSearchRequest(BaseModel):
     start_date: datetime | None = None
     end_date: datetime | None = None
     max_results: int = Field(default=10, ge=1, le=50)
-    h3_resolution: int = Field(default=7, ge=3, le=10)
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -65,7 +64,6 @@ class SourceStatus(BaseModel):
 class GeoSearchResponse(BaseModel):
     status: Literal["success", "partial_success", "upstream_unavailable"]
     total_results: int
-    h3_cells_count: int
     execution_time_seconds: float
     area: dict
     sources: dict[str, SourceStatus]
