@@ -40,9 +40,8 @@ export default function CentroidAction({ onCancel }) {
       const name = resultName.trim() || `Centroid (${nameA})`;
 
       const response = await layerService.runCentroid({
-        feature_id: featAObj.backendId,
         case_id: activeCaseId,
-        name: name,
+        feature_number: featAObj.feature_number,
       });
 
       const feat = response?.features ? response.features[0] : response;

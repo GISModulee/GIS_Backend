@@ -1,71 +1,68 @@
 import axiosInstance from "@/api/axiosInstance.js";
-import { API_ENDPOINTS } from "@/config/apiConfig.js";
 
 const layerService = {
   getAllForCase: async (caseId = null) => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.CASES.LAYERS(caseId));
+    const { data } = await axiosInstance.get(caseId ? `/layers/case/${caseId}` : "/layers");
     return data;
   },
 
 
   updateLayer: async (layerId, payload) => {
-    const { data } = await axiosInstance.patch(API_ENDPOINTS.LAYERS.BY_ID(layerId), payload);
+    const { data } = await axiosInstance.patch(`/layers/${layerId}`, payload);
     return data;
   },
 
   deleteLayer: async (layerId) => {
-    await axiosInstance.delete(API_ENDPOINTS.LAYERS.BY_ID(layerId));
+    await axiosInstance.delete(`/layers/${layerId}`);
   },
 
   createFeature: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.FEATURES.ALL, payload);
+    const { data } = await axiosInstance.post("/features", payload);
     return data;
   },
 
   updateFeature: async (featureId, payload) => {
-    const { data } = await axiosInstance.patch(API_ENDPOINTS.FEATURES.BY_ID(featureId), payload);
+    const { data } = await axiosInstance.patch(`/features/${featureId}`, payload);
     return data;
   },
 
   replaceFeature: async (featureId, payload) => {
-    const { data } = await axiosInstance.put(API_ENDPOINTS.FEATURES.BY_ID(featureId), payload);
+    const { data } = await axiosInstance.put(`/features/${featureId}`, payload);
     return data;
   },
 
   deleteFeature: async (featureId) => {
-    await axiosInstance.delete(API_ENDPOINTS.FEATURES.BY_ID(featureId));
+    await axiosInstance.delete(`/features/${featureId}`);
   },
 
   getFeaturesByLayer: async (layerId) => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.FEATURES.BY_LAYER(layerId));
+    const { data } = await axiosInstance.get(`/layers/${layerId}/features`);
     return data;
   },
 
   getAllFeatures: async () => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.FEATURES.ALL);
+    const { data } = await axiosInstance.get("/features");
     return data;
   },
 
   // Replace addComment and add getCommentImage
-  addComment: async (featureId, comment, userId = 1, imageFile = null) => {
+  addComment: async (caseId, featureNumber, comment, imageFile = null) => {
     const formData = new FormData();
-    formData.append("feature_id", featureId);
-    formData.append("user_id", userId);
+    formData.append("case_id", caseId);
+    formData.append("feature_number", featureNumber);
     formData.append("comment", comment);
     if (imageFile) {
-      formData.append("image", imageFile);
       formData.append("attachment", imageFile);
-      formData.append("file", imageFile);
     }
 
-    const { data } = await axiosInstance.post(API_ENDPOINTS.COMMENTS.CREATE, formData, {
+    const { data } = await axiosInstance.post("/comments", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return data;
   },
 
-  getComments: async (featureId) => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.COMMENTS.BY_FEATURE(featureId));
+  getComments: async (caseId, featureNumber) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/features/${featureNumber}/comments`);
     return data;
   },
 
@@ -85,31 +82,31 @@ const layerService = {
   },
   // GET /layers (no case_id)
   getAllLayers: async () => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.LAYERS.ALL);
+    const { data } = await axiosInstance.get("/layers");
     return data;
   },
 
   createLayer: async (payload) => {
     const { data } = await axiosInstance.post(
-      API_ENDPOINTS.LAYERS.ALL,
+      "/layers",
       payload
     );
     return data;
   },
 
   getCases: async () => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.CASES.ALL);
+    const { data } = await axiosInstance.get("/cases");
     return data;
   },
 
   getCaseById: async (caseId) => {
-    const { data } = await axiosInstance.get(API_ENDPOINTS.CASES.BY_ID(caseId));
+    const { data } = await axiosInstance.get(`/cases/${caseId}`);
     return data;
   },
 
   replaceLayer: async (layerId, payload) => {
     if (payload.case_id !== undefined) {
-      const { data } = await axiosInstance.put(API_ENDPOINTS.LAYERS.BY_ID(layerId), {
+      const { data } = await axiosInstance.put(`/layers/${layerId}`, {
         case_id: payload.case_id,
         name: payload.name,
         layer_type: payload.layer_type || "group",
@@ -117,7 +114,7 @@ const layerService = {
       });
       return data;
     } else {
-      const { data } = await axiosInstance.patch(API_ENDPOINTS.LAYERS.BY_ID(layerId), {
+      const { data } = await axiosInstance.patch(`/layers/${layerId}`, {
         name: payload.name,
       });
       return data;
@@ -125,37 +122,42 @@ const layerService = {
   },
 
   runUnion: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.UNION, payload);
+    const { data } = await axiosInstance.post("/vector/union", payload);
     return data;
   },
 
   runIntersection: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.INTERSECTION, payload);
+    const { data } = await axiosInstance.post("/vector/intersection", payload);
     return data;
   },
 
   runDifference: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.DIFFERENCE, payload);
+    const { data } = await axiosInstance.post("/vector/difference", payload);
     return data;
   },
 
   runBuffer: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.BUFFER, payload);
+    const { data } = await axiosInstance.post("/vector/buffer", payload);
     return data;
   },
 
   runSymmetricDifference: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.SYM_DIFFERENCE, payload);
+    const { data } = await axiosInstance.post("/vector/symdifference", payload);
     return data;
   },
 
   runCentroid: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.CENTROID, payload);
+    const { data } = await axiosInstance.post("/vector/centroid", payload);
     return data;
   },
 
   runConvexHull: async (payload) => {
-    const { data } = await axiosInstance.post(API_ENDPOINTS.VECTOR.CONVEX_HULL, payload);
+    const { data } = await axiosInstance.post("/vector/convex-hull", payload);
+    return data;
+  },
+
+  getFeaturesByCase: async (caseId) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/features`);
     return data;
   },
 };

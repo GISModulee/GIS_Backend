@@ -51,9 +51,8 @@ export default function ConvexHullAction({ onCancel }) {
       const name = resultName.trim() || `Convex Hull (${nameA} & ${nameB})`;
 
       const response = await layerService.runConvexHull({
-        feature_ids: [featAObj.backendId, featBObj.backendId],
         case_id: activeCaseId,
-        name: name,
+        feature_numbers: [featAObj.feature_number, featBObj.feature_number],
       });
 
       console.log("[ConvexHullAction] response:", response);

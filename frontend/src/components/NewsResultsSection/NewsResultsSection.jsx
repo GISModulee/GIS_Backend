@@ -18,7 +18,7 @@ export default function NewsResultsSection({
         </div>
       )}
 
-      {errorMsg && (
+      {/* {errorMsg && (
         <div className="flex-1 flex items-center justify-center p-6 text-center">
           <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-2xl p-6 max-w-md">
             <AlertCircle className="text-red-500 mx-auto mb-2" size={28} />
@@ -26,7 +26,7 @@ export default function NewsResultsSection({
             <p className="text-xs text-red-600 dark:text-red-400 mt-1">{errorMsg}</p>
           </div>
         </div>
-      )}
+      )} */}
 
       {!loading && !errorMsg && newsResults === null && (
         <div className="flex-1 flex flex-col items-center justify-center py-20 text-center text-gray-400 dark:text-gray-500">

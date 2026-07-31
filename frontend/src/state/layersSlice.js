@@ -78,14 +78,17 @@ const layersSlice = createSlice({
       }
     },
 
-    // Called after createFeature API returns — writes backendId into the local feature
+    // Called after createFeature API returns — writes backendId and metadata into the local feature
     setFeatureBackendId(state, action) {
-      const { layerLocalId, featureLocalId, backendId } = action.payload;
+      const { layerLocalId, featureLocalId, backendId, feature_number, case_id, layer_id } = action.payload;
       const layer = state.items.find((l) => l.localId === layerLocalId);
       if (!layer) return;
       const feature = layer.features.find((f) => f.localId === featureLocalId);
       if (feature) {
         feature.backendId = backendId;
+        feature.feature_number = feature_number;
+        feature.case_id = case_id;
+        feature.layer_id = layer_id;
         feature.status = "saved";
       }
     },

@@ -117,6 +117,9 @@ export function useLayerDrawing() {
               layerLocalId: selectedLayer?.localId || preLayerLocalId,
               featureLocalId: preFeatureLocalId,
               backendId: featureRes.feature_id || featureRes.id,
+              feature_number: featureRes.feature_number,
+              case_id: featureRes.case_id || resolvedCaseId,
+              layer_id: featureRes.layer_id || backendLayerId,
             })
           );
 
