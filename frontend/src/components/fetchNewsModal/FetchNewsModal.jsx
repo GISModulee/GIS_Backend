@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSelector } from "react-redux";
 import { createPortal } from "react-dom";
 import { useLayers } from "@/hooks/useLayers.js";
-import { layersClient } from "@/api/client.js";
+import axiosInstance from "@/api/axiosInstance.js";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/utils/ErrorUtils.js";
 
@@ -124,7 +124,7 @@ export default function FetchNewsModal({ onClose }) {
 
     try {
       console.log("[FetchNews] Searching news with payload:", payload);
-      const response = await layersClient.post("/api/geo-search/news", payload, {
+      const response = await axiosInstance.post("/api/geo-search/news", payload, {
         timeout: 0,
       });
       console.log("[FetchNews] Response:", response.data);

@@ -1,4 +1,4 @@
-import { geoClient } from "@/api/client.js";
+import axiosInstance from "@/api/axiosInstance.js";
 import { API_ENDPOINTS } from "@/config/apiConfig.js";
 
 function parseNdjsonToGeojson(ndjsonText) {
@@ -67,17 +67,17 @@ function parseNdjsonToGeojson(ndjsonText) {
 
 const boundaryService = {
   async getIndiaBoundary() {
-    const { data } = await geoClient.get(API_ENDPOINTS.BOUNDARIES.INDIA);
+    const { data } = await axiosInstance.get(API_ENDPOINTS.BOUNDARIES.INDIA);
     return parseNdjsonToGeojson(data);
   },
 
   async getStateBoundary(stateName) {
-    const { data } = await geoClient.get(API_ENDPOINTS.BOUNDARIES.STATE(stateName));
+    const { data } = await axiosInstance.get(API_ENDPOINTS.BOUNDARIES.STATE(stateName));
     return parseNdjsonToGeojson(data);
   },
 
   async getDistrictBoundary(districtName) {
-    const { data } = await geoClient.get(API_ENDPOINTS.BOUNDARIES.DISTRICT(districtName));
+    const { data } = await axiosInstance.get(API_ENDPOINTS.BOUNDARIES.DISTRICT(districtName));
     return parseNdjsonToGeojson(data);
   },
 };
