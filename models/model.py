@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from geoalchemy2 import Geography, Geometry
 
+
 from database.database import Base
 
 
@@ -62,7 +63,7 @@ class Layer(Base):
     __tablename__ = "layers"
 
     id = Column(Integer, primary_key=True)
-    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(100), nullable=False)
     layer_type = Column(String(50))
     visible = Column(Boolean, default=True)
@@ -87,6 +88,7 @@ class Feature(Base):
     __tablename__ = "features"
 
     id = Column(Integer, primary_key=True)
+    feature_number = Column(Integer, nullable=False)
     layer_id = Column(Integer, ForeignKey("layers.id", ondelete="CASCADE"))
     case_id = Column(Integer, ForeignKey("cases.id"))
     name = Column(Text)
@@ -105,28 +107,46 @@ class Feature(Base):
     case = relationship("Case", back_populates="features")
     creator = relationship("User", back_populates="features_created")
     comments = relationship("Comment", back_populates="feature")
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id",
+            "feature_number",
+            name="uq_feature_case_number",
+        ),
+    )
 
 
 class Comment(Base):
     __tablename__ = "comments"
 
     id = Column(Integer, primary_key=True)
-    feature_id = Column(Integer, ForeignKey("features.id", ondelete="CASCADE"), nullable=False)
 
-    # FK added (previously a bare Integer column with no constraint) —
-    # needed to safely JOIN against `users` in get_feature_comments() so
-    # every comment can be attributed to its author for the multi-user
-    # thread view. nullable=True kept so historical rows with no user_id
-    # (or one that no longer resolves) don't break.
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    feature_id = Column(
+        Integer,
+        ForeignKey("features.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    case_id = Column(
+        Integer,
+        ForeignKey("cases.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    layer_id = Column(
+        Integer,
+        ForeignKey("layers.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
+
     comment = Column(Text, nullable=False)
 
-    # RENAMED from image_data + two new columns: comments used to only
-    # support a single hardcoded "image/jpeg" attachment. Now supports
-    # any of the allowed types (image, PDF, DOCX, plain text) — see
-    # services/comment_validator.py — and the real filename/content
-    # type are stored so they can be served back correctly instead of
-    # always being labeled image/jpeg regardless of what was uploaded.
     attachment_data = Column(LargeBinary, nullable=True)
     attachment_filename = Column(String(255), nullable=True)
     attachment_content_type = Column(String(100), nullable=True)
@@ -134,7 +154,6 @@ class Comment(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     feature = relationship("Feature", back_populates="comments")
-
 
 class ImageRecord(Base):
     __tablename__ = "image_records"

@@ -1,21 +1,23 @@
 from pydantic import BaseModel
 from typing import List
- 
- 
+
+
 class VectorOperation(BaseModel):
-    feature_ids: List[int]
- 
- 
- 
+    case_id: int
+    feature_numbers: List[int]
+
+
 class BufferOperation(BaseModel):
-    feature_id: int
+    case_id: int
+    feature_number: int
     distance: float
- 
- 
+
+
 class CentroidOperation(BaseModel):
-    feature_id: int
- 
- 
+    case_id: int
+    feature_number: int
+
+
 class ConvexHullOperation(BaseModel):
-    feature_ids: list[int]
- 
+    case_id: int
+    feature_numbers: List[int]

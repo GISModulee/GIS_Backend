@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Feature, Layer
+from models.model import Feature, Layer, Case
 from schemas.feature_schema import FeatureCreate
 from utils.logger import logger
 from utils.exceptions import (
@@ -16,7 +16,6 @@ from utils.exceptions import (
     ServiceUnavailableError,
 )
 
-from services.case_service import create_untitled_case
 from services.layer_service import create_untitled_layer
 
 
@@ -40,7 +39,10 @@ def _row_to_feature_dict(row):
         geometry_type = geometry["type"]
 
     return {
+        
         "id": row.id,
+        "feature_number": row.feature_number,
+        "case_id": row.case_id,
         "layer_id": row.layer_id,
         "name": row.name,
         "geometry_type": geometry_type,
@@ -56,6 +58,8 @@ def _row_to_feature_dict(row):
 def _feature_select():
     return select(
         Feature.id,
+        Feature.feature_number,
+        Feature.case_id,
         Feature.layer_id,
         Feature.name,
         Feature.geometry_type,
@@ -95,13 +99,13 @@ def create_feature(feature, created_by: int | None = None):
         f"case_id={feature.case_id} | layer_id={feature.layer_id} | created_by={created_by}"
     )
 
-    # ---------------------------------
-    # 1. CREATE CASE ONLY IF NOT PROVIDED
-    # ---------------------------------
-    case_id = feature.case_id or None
+# ---------------------------------
+# 1. CASE ID IS MANDATORY
+# ---------------------------------
+    case_id = feature.case_id
 
     if case_id is None:
-        case_id = create_untitled_case(created_by)
+        raise BadRequestError("case_id is required")
 
     # ---------------------------------
     # 2. CREATE NEW LAYER ONLY IF NOT PROVIDED
@@ -129,11 +133,39 @@ def create_feature(feature, created_by: int | None = None):
             )
             raise UnprocessableEntityError("'geometry' is required for this geometry_type")
 
-    # ---------------------------------
-    # 4. INSERT FEATURE
-    # ---------------------------------
+# ---------------------------------
+# 4. INSERT FEATURE
+# ---------------------------------
     try:
         with SessionLocal.begin() as db:
+
+            # Lock the case while generating feature numbers
+            db.execute(
+                select(func.pg_advisory_xact_lock(case_id))
+            )
+
+            # Check layer exists
+            layer = db.get(Layer, layer_id)
+
+            if layer is None:
+                raise NotFoundError("Layer not found")
+
+            # Ensure the layer belongs to the given case
+            if layer.case_id != case_id:
+                raise BadRequestError(
+                    "Layer does not belong to the specified case."
+                )
+
+            # Generate next feature number for this case
+            max_feature_number = db.scalar(
+                select(
+                    func.coalesce(func.max(Feature.feature_number), 0)
+                ).where(
+                    Feature.case_id == case_id
+                )
+            )
+
+            next_feature_number = max_feature_number + 1
 
             if feature.geometry_type == "Circle":
 
@@ -141,7 +173,11 @@ def create_feature(feature, created_by: int | None = None):
                     func.ST_Buffer(
                         func.ST_Transform(
                             func.ST_SetSRID(
-                                func.ST_Point(feature.center["lng"], feature.center["lat"]), 4326
+                                func.ST_Point(
+                                    feature.center["lng"],
+                                    feature.center["lat"]
+                                ),
+                                4326,
                             ),
                             3857,
                         ),
@@ -150,11 +186,17 @@ def create_feature(feature, created_by: int | None = None):
                     ),
                     4326,
                 )
+
             else:
                 geometry = func.ST_SetSRID(
-                    func.ST_GeomFromGeoJSON(json.dumps(feature.geometry)), 4326
+                    func.ST_GeomFromGeoJSON(
+                        json.dumps(feature.geometry)
+                    ),
+                    4326
                 )
+
             new_feature = Feature(
+                feature_number=next_feature_number,
                 layer_id=layer_id,
                 case_id=case_id,
                 name=feature.name,
@@ -164,31 +206,104 @@ def create_feature(feature, created_by: int | None = None):
                 properties=feature.properties,
                 created_by=created_by,
             )
+
             db.add(new_feature)
             db.flush()
+
             feature_id = new_feature.id
 
     except IntegrityError as e:
-        logger.error(f"Integrity error creating feature | layer_id={layer_id} | error={e}", exc_info=True)
-        raise NotFoundError("The specified layer does not exist") from e
+        logger.error(
+            f"Integrity error creating feature | layer_id={layer_id} | error={e}",
+            exc_info=True
+        )
+        raise BadRequestError(
+    "Feature creation failed due to database constraint"
+        ) from e
 
     except DataError as e:
-        logger.error(f"Data error creating feature (bad geometry?) | layer_id={layer_id} | error={e}", exc_info=True)
+        logger.error(
+            f"Data error creating feature (bad geometry?) | layer_id={layer_id} | error={e}",
+            exc_info=True
+        )
         raise UnprocessableEntityError("Invalid geometry data") from e
 
     except SQLAlchemyError as e:
-        logger.error(f"Unexpected DB error creating feature | layer_id={layer_id} | error={e}", exc_info=True)
+        logger.error(
+            f"Unexpected DB error creating feature | layer_id={layer_id} | error={e}",
+            exc_info=True
+        )
         raise ServiceUnavailableError("Failed to create feature") from e
 
-    logger.info(f"Feature created | feature_id={feature_id} | case_id={case_id} | layer_id={layer_id}")
+    logger.info(
+        f"Feature created | feature_id={feature_id} | case_id={case_id} | layer_id={layer_id}"
+    )
 
     return {
         "success": True,
         "feature_id": feature_id,
+        "feature_number": next_feature_number,
         "case_id": case_id,
         "layer_id": layer_id
     }
 
+
+
+
+
+# ===================================================
+# GET FEATURES OF A CASE
+# ===================================================
+
+def get_case_features(case_id):
+
+    logger.info(
+        f"Fetching features for case | case_id={case_id}"
+    )
+
+    try:
+        with SessionLocal() as db:
+
+            case_exists = db.scalar(
+                select(Case.id).where(
+                    Case.id == case_id
+                )
+            )
+
+            if case_exists is None:
+                logger.warning(
+                    f"Get case features failed: case not found | case_id={case_id}"
+                )
+                raise NotFoundError("Case not found")
+
+            result = db.execute(
+                _feature_select()
+                .where(
+                    Feature.case_id == case_id
+                )
+                .order_by(
+                    Feature.feature_number
+                )
+            )
+
+            rows = list(result)
+
+    except NotFoundError:
+        raise
+
+    except SQLAlchemyError as e:
+        logger.error(
+            f"Failed to fetch case features | case_id={case_id} | error={e}",
+            exc_info=True
+        )
+        raise ServiceUnavailableError(
+            "Failed to fetch features"
+        ) from e
+
+    return [
+        _row_to_feature_dict(row)
+        for row in rows
+    ]
 
 # ===================================================
 # GET ALL FEATURES

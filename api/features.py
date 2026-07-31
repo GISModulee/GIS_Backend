@@ -11,6 +11,7 @@ from services.feature_service import (
     get_features,
     get_feature,
     get_layer_features,
+    get_case_features,
     update_feature,
     delete_feature,
     patch_feature
@@ -106,3 +107,20 @@ def list_layer_features(layer_id: int, current_user=Depends(get_current_user)):
     logger.info(f"GET /layers/{layer_id}/features | user_id={current_user['user_id']}")
 
     return get_layer_features(layer_id)
+
+
+
+# ===================================================
+# GET FEATURES OF A CASE — any authenticated user
+# ===================================================
+@router.get("/cases/{case_id}/features")
+def list_case_features(
+    case_id: int,
+    current_user=Depends(get_current_user)
+):
+
+    logger.info(
+        f"GET /cases/{case_id}/features | user_id={current_user['user_id']}"
+    )
+
+    return get_case_features(case_id)

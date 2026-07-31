@@ -1,8 +1,6 @@
-import sys
+from sqlalchemy import text
 
-from sqlalchemy.exc import SQLAlchemyError
-
-from database.database import Base, engine
+from database.database import engine, Base
 from models.model import (
     User,
     Case,
@@ -11,24 +9,28 @@ from models.model import (
     Comment,
     ImageRecord,
 )
-from utils.logger import logger
 
 
-def init_tables():
-    logger.info("Initializing database tables...")
-    try:
-        Base.metadata.create_all(bind=engine)
-    except SQLAlchemyError as e:
-        logger.error(
-            f"Database table initialization failed: {e}. "
-            "Common causes: PostGIS extension not enabled "
-            "(run `CREATE EXTENSION IF NOT EXISTS postgis;`), "
-            "or DATABASE_URL is unreachable.",
-            exc_info=True,
-        )
-        sys.exit(1)
-    logger.info("Database tables initialized successfully.")
+def init_database():
+
+    with engine.begin() as conn:
+
+        # Enable PostGIS
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+
+        print("✓ PostGIS enabled")
+
+        # Development only
+        # Drops all existing tables
+        Base.metadata.drop_all(bind=conn)
+
+        print("✓ Old tables dropped")
+
+        # Create every table from models.py
+        Base.metadata.create_all(bind=conn)
+
+        print("✓ Tables created successfully")
 
 
 if __name__ == "__main__":
-    init_tables()
+    init_database()

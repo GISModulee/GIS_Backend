@@ -86,28 +86,64 @@ def create_import_layer(case_id: int, name: str, file_hash: str):
 def create_untitled_layer(case_id: int):
     try:
         with SessionLocal.begin() as db:
-            db.execute(select(func.pg_advisory_xact_lock(case_id)))
-            suffix = cast(func.replace(Layer.name, "Auto Layer ", ""), Integer)
-            max_number = db.scalar(select(func.coalesce(func.max(suffix), 0)).where(
-                Layer.case_id == case_id,
-                Layer.layer_type == "auto",
-                Layer.name.like("Auto Layer %"),
-            ))
-            for offset in range(1, 11):
-                record = Layer(case_id=case_id, name=f"Auto Layer {max_number + offset}", layer_type="auto", visible=True)
-                try:
-                    with db.begin_nested():
-                        db.add(record)
-                        db.flush()
-                    return record.id
-                except IntegrityError as e:
-                    if getattr(getattr(e, "orig", None), "pgcode", None) != "23505":
-                        raise
-            raise ServiceUnavailableError("Failed to auto-create layer: too many name collisions. Try again.")
-    except ServiceUnavailableError:
-        raise
+
+            # Lock case to avoid duplicate auto layer numbers
+            db.execute(
+                select(func.pg_advisory_xact_lock(case_id))
+            )
+
+            max_number = db.scalar(
+                select(
+                    func.coalesce(
+                        func.max(
+                            cast(
+                                func.replace(
+                                    Layer.name,
+                                    "Auto Layer ",
+                                    ""
+                                ),
+                                Integer
+                            ),
+                        ),
+                        0
+                    )
+                )
+                .where(
+                    Layer.case_id == case_id,
+                    Layer.layer_type == "auto",
+                    Layer.name.like("Auto Layer %")
+                )
+            )
+
+
+            next_number = max_number + 1
+
+
+            record = Layer(
+                case_id=case_id,
+                name=f"Auto Layer {next_number}",
+                layer_type="auto",
+                visible=True
+            )
+
+
+            db.add(record)
+            db.flush()
+
+
+            return record.id
+
+
     except SQLAlchemyError as e:
-        raise ServiceUnavailableError("Failed to auto-create layer") from e
+
+        logger.error(
+            f"Failed to auto-create layer | case_id={case_id} | error={e}",
+            exc_info=True
+        )
+
+        raise ServiceUnavailableError(
+            "Failed to auto-create layer"
+        ) from e
 
 
 def get_layers():
