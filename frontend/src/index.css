@@ -1,0 +1,237 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.leaflet-interactive:focus {
+  outline: none !important;
+}
+
+.leaflet-interactive {
+  outline: none !important;
+}
+
+.leaflet-container:focus {
+  outline: none !important;
+}
+
+.feature-tooltip {
+  background: white !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 12px !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12) !important;
+  padding: 10px 12px !important;
+  pointer-events: none;
+}
+
+.feature-tooltip::before {
+  display: none !important;
+}
+
+/* Custom Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Dark theme scrollbar */
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Dark theme leaflet popups & tooltips */
+.dark .leaflet-popup-content-wrapper,
+.dark .leaflet-popup-tip,
+.dark .leaflet-tooltip {
+  background-color: #0f172a !important;
+  /* bg-slate-900 */
+  color: #f1f5f9 !important;
+  /* text-slate-100 */
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid #1e293b !important;
+  /* border-slate-800 */
+}
+
+.dark .leaflet-popup-content {
+  color: #f1f5f9 !important;
+}
+
+/* Comment Popup Styling (Theme-aware) */
+.comment-popup-title {
+  color: #1e293b;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.dark .comment-popup-title {
+  color: #f8fafc;
+  border-bottom: 1px solid #334155;
+}
+
+.comment-card {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.dark .comment-card {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+}
+
+.comment-user {
+  color: #64748b;
+}
+
+.dark .comment-user {
+  color: #94a3b8;
+}
+
+.comment-text {
+  color: #334155;
+}
+
+.dark .comment-text {
+  color: #cbd5e1;
+}
+
+.comment-img {
+  border: 1px solid #cbd5e1;
+}
+
+.dark .comment-img {
+  border: 1px solid #475569;
+}
+
+/* Quick Comment Input in Popup */
+.popup-comment-input {
+  background-color: #ffffff;
+  color: #1f2937;
+  border: 1px solid #d1d5db;
+}
+
+.dark .popup-comment-input {
+  background-color: #1e293b;
+  color: #f8fafc;
+  border: 1px solid #334155;
+}
+
+.popup-file-preview {
+  color: #10b981;
+}
+
+.dark .popup-file-preview {
+  color: #34d399;
+}
+
+/* Tooltip text styling (Theme-aware) */
+.tooltip-title {
+  color: #111827;
+}
+
+.dark .tooltip-title {
+  color: #f9fafb;
+}
+
+.tooltip-label {
+  color: #6b7280;
+}
+
+.dark .tooltip-label {
+  color: #9ca3af;
+}
+
+.tooltip-value {
+  color: #374151;
+}
+
+.dark .tooltip-value {
+  color: #d1d5db;
+}
+
+/* Feature popup properties custom styles */
+.feature-tooltip-popup .leaflet-popup-content-wrapper {
+  background: white !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.08) !important;
+  padding: 0 !important;
+}
+
+.feature-tooltip-popup .leaflet-popup-content {
+  margin: 16px 24px 16px 20px !important;
+}
+
+.feature-tooltip-popup .leaflet-popup-tip {
+  background: white !important;
+  border: 1px solid #e5e7eb !important;
+  box-shadow: none !important;
+}
+
+.feature-tooltip-popup-top .leaflet-popup-tip-container {
+  top: -19px !important;
+  bottom: auto !important;
+}
+
+.feature-tooltip-popup-top .leaflet-popup-tip {
+  margin: 11px auto 0 !important;
+  transform: rotate(45deg) !important;
+  border-bottom: none !important;
+  border-right: none !important;
+  border-top: 1px solid #e5e7eb !important;
+  border-left: 1px solid #e5e7eb !important;
+}
+
+.dark .feature-tooltip-popup-top .leaflet-popup-tip {
+  border-top-color: #374151 !important;
+  border-left-color: #374151 !important;
+}
+
+.dark .feature-tooltip-popup .leaflet-popup-content-wrapper {
+  background: #111827 !important;
+  border-color: #374151 !important;
+  color: white !important;
+}
+
+.dark .feature-tooltip-popup .leaflet-popup-tip {
+  background: #111827 !important;
+  border-color: #374151 !important;
+}
+
+.feature-tooltip-popup .leaflet-popup-close-button {
+  color: #9ca3af !important;
+  top: 10px !important;
+  right: 10px !important;
+}
+
+.feature-tooltip-popup .leaflet-popup-close-button:hover {
+  color: #4b5563 !important;
+}

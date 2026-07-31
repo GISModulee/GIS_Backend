@@ -1,0 +1,12 @@
+/* index.css or App.css */
+.feature-tooltip {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  padding: 10px 12px;
+  pointer-events: none;
+}
+.feature-tooltip::before {
+  display: none;  /* remove arrow */
+}
