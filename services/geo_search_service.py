@@ -2,7 +2,12 @@ import asyncio
 import time
 from datetime import datetime, timezone
 
-from schemas.geo_search_schema import GeoSearchRequest, GeoSearchResponse, SourceStatus
+from schemas.geo_search_schema import (
+    GeoSearchRequest,
+    GeoSearchResponse,
+    GeoSearchSelection,
+    SourceStatus,
+)
 from services.geo_search_gdelt import fetch_gdelt
 from services.geo_search_geometry import area_context, feature_geometry
 from services.geo_search_google import fetch_google_news, fetch_government_news
@@ -15,6 +20,16 @@ from services.geo_search_utils import (
     inclusive_end_date,
 )
 from utils.exceptions import GatewayTimeoutError, NotFoundError, ServiceUnavailableError
+from utils.constants import (
+    GEO_SEARCH_NO_RESULTS,
+    GEO_SEARCH_PROVIDER_EMPTY,
+    GEO_SEARCH_PROVIDER_TIMEOUT,
+    GEO_SEARCH_PROVIDERS_UNAVAILABLE,
+    GEO_SEARCH_STATUS_PARTIAL_SUCCESS,
+    GEO_SEARCH_STATUS_SUCCESS,
+    GEO_SEARCH_STATUS_UPSTREAM_UNAVAILABLE,
+    GEO_SEARCH_TIMEOUT,
+)
 from utils.logger import logger
 
 
@@ -26,7 +41,9 @@ class GeoSearchService:
         cls, request: GeoSearchRequest
     ) -> GeoSearchResponse:
         started_at = time.perf_counter()
-        geometry = await feature_geometry(request.feature_id)
+        geometry = await feature_geometry(
+            request.case_id, request.layer_id, request.feature_id
+        )
         area, place_result = await asyncio.gather(
             area_context(geometry),
             discover_places(geometry),
@@ -90,6 +107,11 @@ class GeoSearchService:
             status=aggregate_status,
             total_results=len(items),
             execution_time_seconds=round(time.perf_counter() - started_at, 3),
+            selection=GeoSearchSelection(
+                case_id=request.case_id,
+                layer_id=request.layer_id,
+                feature_id=request.feature_id,
+            ),
             area=area,
             sources=sources,
             items=items,
@@ -135,7 +157,7 @@ class GeoSearchService:
         statuses = {result.status for result in provider_results}
         healthy_results = [
             result for result in provider_results
-            if result.status in {"success", "empty"}
+            if result.status in {GEO_SEARCH_STATUS_SUCCESS, GEO_SEARCH_PROVIDER_EMPTY}
         ]
         logger.warning(
             "Geo news search produced no usable results | providers=%s",
@@ -148,25 +170,20 @@ class GeoSearchService:
                 for result in provider_results
             },
         )
-        if not healthy_results and "timeout" in statuses:
-            raise GatewayTimeoutError(
-                "News search timed out before results could be retrieved. Please try again."
-            )
+        if not healthy_results and GEO_SEARCH_PROVIDER_TIMEOUT in statuses:
+            raise GatewayTimeoutError(GEO_SEARCH_TIMEOUT)
         if healthy_results:
-            raise NotFoundError(
-                "No matching news was found for the selected area and filters."
-            )
-        raise ServiceUnavailableError(
-            "News providers are temporarily unavailable. Please try again."
-        )
+            raise NotFoundError(GEO_SEARCH_NO_RESULTS)
+        raise ServiceUnavailableError(GEO_SEARCH_PROVIDERS_UNAVAILABLE)
 
     @classmethod
     async def _aggregate_status(cls, provider_results) -> str:
         healthy = sum(
-            result.status in {"success", "empty"} for result in provider_results
+            result.status in {GEO_SEARCH_STATUS_SUCCESS, GEO_SEARCH_PROVIDER_EMPTY}
+            for result in provider_results
         )
         if healthy == len(provider_results):
-            return "success"
+            return GEO_SEARCH_STATUS_SUCCESS
         if healthy:
-            return "partial_success"
-        return "upstream_unavailable"
+            return GEO_SEARCH_STATUS_PARTIAL_SUCCESS
+        return GEO_SEARCH_STATUS_UPSTREAM_UNAVAILABLE

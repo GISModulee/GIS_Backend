@@ -8,6 +8,13 @@ import httpx
 from pydantic import BaseModel, Field
 from shapely.geometry import Point
 
+from utils.constants import (
+    GEO_SEARCH_PROVIDER_EMPTY,
+    GEO_SEARCH_PROVIDER_ERROR,
+    GEO_SEARCH_PROVIDER_RATE_LIMITED,
+    GEO_SEARCH_PROVIDER_TIMEOUT,
+    GEO_SEARCH_STATUS_SUCCESS,
+)
 
 USER_AGENT = "GeoIntelligence-GeoSearch/2.1 (news-search)"
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
@@ -62,7 +69,13 @@ class RawNewsItem(BaseModel):
 
 class ProviderResult(BaseModel):
     name: str
-    status: Literal["success", "empty", "timeout", "rate_limited", "error"]
+    status: Literal[
+        GEO_SEARCH_STATUS_SUCCESS,
+        GEO_SEARCH_PROVIDER_EMPTY,
+        GEO_SEARCH_PROVIDER_TIMEOUT,
+        GEO_SEARCH_PROVIDER_RATE_LIMITED,
+        GEO_SEARCH_PROVIDER_ERROR,
+    ]
     items: list[RawNewsItem] = Field(default_factory=list)
     detail: str | None = None
 

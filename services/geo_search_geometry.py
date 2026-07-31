@@ -7,10 +7,20 @@ from shapely.geometry.base import BaseGeometry
 from shapely.validation import explain_validity
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
 from database.database import SessionLocal
 from models.model import Feature
 from services.geo_search_utils import MAX_AREA_SQUARE_DEGREES, REQUEST_TIMEOUT, USER_AGENT
+from utils.constants import (
+    GEO_SEARCH_AREA_TOO_LARGE,
+    GEO_SEARCH_FEATURE_BOUNDS_INVALID,
+    GEO_SEARCH_FEATURE_EMPTY_GEOMETRY,
+    GEO_SEARCH_FEATURE_EMPTY_SHAPE,
+    GEO_SEARCH_FEATURE_INVALID_GEOMETRY,
+    GEO_SEARCH_FEATURE_LOAD_FAILED,
+    GEO_SEARCH_FEATURE_NOT_FOUND,
+)
 from utils.exceptions import (
     BadRequestError,
     NotFoundError,
@@ -20,49 +30,64 @@ from utils.exceptions import (
 from utils.logger import logger
 
 
-async def feature_geometry(feature_id: int) -> BaseGeometry:
-    logger.info("Loading Geo Search feature | feature_id=%s", feature_id)
-    try:
-        with SessionLocal() as db:
-            row = db.execute(
-                select(Feature.id, func.ST_AsGeoJSON(Feature.geom).label("geometry"))
-                .where(Feature.id == feature_id)
-            ).one_or_none()
-    except SQLAlchemyError as exc:
-        logger.error(
-            "Failed to load Geo Search feature | feature_id=%s | error=%s",
-            feature_id,
-            exc,
-            exc_info=True,
-        )
-        raise ServiceUnavailableError("Failed to load selected feature") from exc
-
+async def feature_geometry(
+    case_id: int, layer_id: int, feature_id: int
+) -> BaseGeometry:
+    logger.info(
+        "Loading Geo Search feature | case_id=%s | layer_id=%s | feature_id=%s",
+        case_id,
+        layer_id,
+        feature_id,
+    )
+    row = await run_in_threadpool(_feature_row, case_id, layer_id, feature_id)
     if row is None:
-        raise NotFoundError("Feature not found")
+        raise NotFoundError(GEO_SEARCH_FEATURE_NOT_FOUND)
     if not row.geometry:
-        raise UnprocessableEntityError("Selected feature has no geometry")
+        raise UnprocessableEntityError(GEO_SEARCH_FEATURE_EMPTY_GEOMETRY)
     try:
         geometry = shape(json.loads(row.geometry))
     except (TypeError, ValueError) as exc:
         logger.error("Stored feature geometry is invalid | feature_id=%s", feature_id)
-        raise UnprocessableEntityError("Selected feature has invalid geometry") from exc
+        raise UnprocessableEntityError(GEO_SEARCH_FEATURE_INVALID_GEOMETRY) from exc
     return await validate_geometry(geometry)
+
+
+def _feature_row(case_id: int, layer_id: int, feature_id: int):
+    try:
+        with SessionLocal() as db:
+            return db.execute(
+                select(Feature.id, func.ST_AsGeoJSON(Feature.geom).label("geometry"))
+                .where(
+                    Feature.id == feature_id,
+                    Feature.layer_id == layer_id,
+                    Feature.case_id == case_id,
+                )
+            ).one_or_none()
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Failed to load Geo Search feature | case_id=%s | layer_id=%s | "
+            "feature_id=%s | error=%s",
+            case_id,
+            layer_id,
+            feature_id,
+            exc,
+            exc_info=True,
+        )
+        raise ServiceUnavailableError(GEO_SEARCH_FEATURE_LOAD_FAILED) from exc
 
 
 async def validate_geometry(geometry: BaseGeometry) -> BaseGeometry:
     if geometry.is_empty:
-        raise UnprocessableEntityError("Selected feature has an empty geometry")
+        raise UnprocessableEntityError(GEO_SEARCH_FEATURE_EMPTY_SHAPE)
     if not geometry.is_valid:
         raise UnprocessableEntityError(
-            f"Selected feature has invalid geometry: {explain_validity(geometry)}"
+            f"{GEO_SEARCH_FEATURE_INVALID_GEOMETRY}: {explain_validity(geometry)}"
         )
     min_lon, min_lat, max_lon, max_lat = geometry.bounds
     if not (-180 <= min_lon <= max_lon <= 180 and -90 <= min_lat <= max_lat <= 90):
-        raise UnprocessableEntityError(
-            "Selected feature geometry is outside valid longitude/latitude bounds"
-        )
+        raise UnprocessableEntityError(GEO_SEARCH_FEATURE_BOUNDS_INVALID)
     if (max_lon - min_lon) * (max_lat - min_lat) > MAX_AREA_SQUARE_DEGREES:
-        raise BadRequestError("Search area is too large; submit a smaller geometry.")
+        raise BadRequestError(GEO_SEARCH_AREA_TOO_LARGE)
     return geometry
 
 

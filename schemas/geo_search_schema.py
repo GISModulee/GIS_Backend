@@ -3,8 +3,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from utils.constants import (
+    GEO_SEARCH_PROVIDER_EMPTY,
+    GEO_SEARCH_PROVIDER_ERROR,
+    GEO_SEARCH_PROVIDER_RATE_LIMITED,
+    GEO_SEARCH_PROVIDER_TIMEOUT,
+    GEO_SEARCH_STATUS_PARTIAL_SUCCESS,
+    GEO_SEARCH_STATUS_SUCCESS,
+    GEO_SEARCH_STATUS_UPSTREAM_UNAVAILABLE,
+)
+
 
 class GeoSearchRequest(BaseModel):
+    case_id: int = Field(..., gt=0)
+    layer_id: int = Field(..., gt=0)
     feature_id: int = Field(..., gt=0)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     start_date: datetime | None = None
@@ -55,16 +67,33 @@ class NewsItem(BaseModel):
 
 
 class SourceStatus(BaseModel):
-    status: Literal["success", "empty", "timeout", "rate_limited", "error"]
+    status: Literal[
+        GEO_SEARCH_STATUS_SUCCESS,
+        GEO_SEARCH_PROVIDER_EMPTY,
+        GEO_SEARCH_PROVIDER_TIMEOUT,
+        GEO_SEARCH_PROVIDER_RATE_LIMITED,
+        GEO_SEARCH_PROVIDER_ERROR,
+    ]
     results: int = 0
     accepted_results: int = 0
     detail: str | None = None
 
 
+class GeoSearchSelection(BaseModel):
+    case_id: int
+    layer_id: int
+    feature_id: int
+
+
 class GeoSearchResponse(BaseModel):
-    status: Literal["success", "partial_success", "upstream_unavailable"]
+    status: Literal[
+        GEO_SEARCH_STATUS_SUCCESS,
+        GEO_SEARCH_STATUS_PARTIAL_SUCCESS,
+        GEO_SEARCH_STATUS_UPSTREAM_UNAVAILABLE,
+    ]
     total_results: int
     execution_time_seconds: float
+    selection: GeoSearchSelection
     area: dict
     sources: dict[str, SourceStatus]
     items: list[NewsItem]

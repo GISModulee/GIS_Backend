@@ -21,6 +21,15 @@ from services.geo_search_utils import (
     raw_item,
     search_query,
 )
+from utils.constants import (
+    GEO_SEARCH_GDELT_FAILED,
+    GEO_SEARCH_GDELT_RATE_LIMITED,
+    GEO_SEARCH_PROVIDER_EMPTY,
+    GEO_SEARCH_PROVIDER_ERROR,
+    GEO_SEARCH_PROVIDER_RATE_LIMITED,
+    GEO_SEARCH_PROVIDER_TIMEOUT,
+    GEO_SEARCH_STATUS_SUCCESS,
+)
 from utils.logger import logger
 
 
@@ -101,7 +110,7 @@ async def request_gdelt(
     geometry: BaseGeometry,
     allowed_domains: tuple[str, ...] = (),
 ) -> ProviderResult:
-    last_status = "error"
+    last_status = GEO_SEARCH_PROVIDER_ERROR
     async with state.gdelt_request_lock:
         async with httpx.AsyncClient(
             timeout=GDELT_TIMEOUT,
@@ -110,15 +119,15 @@ async def request_gdelt(
         ) as client:
             for endpoint_index, endpoint in enumerate(GDELT_URLS):
                 result, retry_status = await _request_endpoint(
-                    client, endpoint_index, endpoint, name, params, geometry, allowed_domains
-                )
+                    client, endpoint_index, endpoint, name,
+                    params, geometry, allowed_domains)
                 if result is not None:
                     return result
                 last_status = retry_status
     return await provider_result(
         name,
         last_status,
-        detail="GDELT connection failed on HTTPS and HTTP endpoints",
+        detail=GEO_SEARCH_GDELT_FAILED,
     )
 
 
@@ -138,9 +147,9 @@ async def _request_endpoint(
     try:
         response = await client.get(endpoint, params=params)
         if response.status_code == 429:
-            return await provider_result(
-                name, "rate_limited", detail="GDELT allows one request every five seconds"
-            ), "rate_limited"
+            result = await provider_result(
+                name, GEO_SEARCH_PROVIDER_RATE_LIMITED, detail=GEO_SEARCH_GDELT_RATE_LIMITED)
+            return result, GEO_SEARCH_PROVIDER_RATE_LIMITED
         response.raise_for_status()
         articles = response.json().get("articles", [])
         items = await _gdelt_items(name, geometry, articles, allowed_domains)
@@ -151,10 +160,11 @@ async def _request_endpoint(
             len(items),
             time.perf_counter() - request_started,
         )
-        return await provider_result(name, "success" if items else "empty", items), "success"
+        status = GEO_SEARCH_STATUS_SUCCESS if items else GEO_SEARCH_PROVIDER_EMPTY
+        return await provider_result(name, status, items), GEO_SEARCH_STATUS_SUCCESS
     except httpx.TimeoutException:
         logger.warning("%s request timed out | endpoint=%s", name, endpoint_label)
-        return None, "timeout"
+        return None, GEO_SEARCH_PROVIDER_TIMEOUT
     except (httpx.HTTPError, ValueError, TypeError) as exc:
         logger.warning(
             "%s request failed | endpoint=%s | error=%s",
@@ -162,7 +172,7 @@ async def _request_endpoint(
             endpoint_label,
             type(exc).__name__,
         )
-        return None, "error"
+        return None, GEO_SEARCH_PROVIDER_ERROR
 
 
 async def _gdelt_items(

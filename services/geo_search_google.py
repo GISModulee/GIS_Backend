@@ -22,6 +22,14 @@ from services.geo_search_utils import (
     raw_item,
     search_query,
 )
+from utils.constants import (
+    GEO_SEARCH_GOVERNMENT_TIMEOUT,
+    GEO_SEARCH_PROVIDER_EMPTY,
+    GEO_SEARCH_PROVIDER_ERROR,
+    GEO_SEARCH_PROVIDER_RATE_LIMITED,
+    GEO_SEARCH_PROVIDER_TIMEOUT,
+    GEO_SEARCH_STATUS_SUCCESS,
+)
 from utils.logger import logger
 
 
@@ -66,14 +74,16 @@ async def fetch_google_news_batch(
         ) as client:
             response = await google_get(client, url)
         if response.status_code == 429:
-            return await provider_result(name, "rate_limited")
+            return await provider_result(name, GEO_SEARCH_PROVIDER_RATE_LIMITED)
         response.raise_for_status()
         return await _google_rss_result(name, response.content, geometry, max_results)
     except httpx.TimeoutException:
-        return await provider_result(name, "timeout")
+        return await provider_result(name, GEO_SEARCH_PROVIDER_TIMEOUT)
     except (httpx.HTTPError, ET.ParseError, ValueError) as exc:
         logger.warning("Google News request failed | error=%s", type(exc).__name__)
-        return await provider_result(name, "error", detail=type(exc).__name__)
+        return await provider_result(
+            name, GEO_SEARCH_PROVIDER_ERROR, detail=type(exc).__name__
+        )
 
 
 async def fetch_government_news(
@@ -100,16 +110,20 @@ async def fetch_government_news(
         ) as client:
             response = await google_get(client, url)
         if response.status_code == 429:
-            return await provider_result(name, "rate_limited")
+            return await provider_result(name, GEO_SEARCH_PROVIDER_RATE_LIMITED)
         response.raise_for_status()
         return await _government_rss_result(
             name, response.content, geometry, max_results, domains, start_date, end_date
         )
     except httpx.TimeoutException:
-        return await provider_result(name, "timeout", detail="Government search timed out")
+        return await provider_result(
+            name, GEO_SEARCH_PROVIDER_TIMEOUT, detail=GEO_SEARCH_GOVERNMENT_TIMEOUT
+        )
     except (httpx.HTTPError, ET.ParseError, ValueError, TypeError) as exc:
         logger.warning("Government search failed | error=%s", type(exc).__name__)
-        return await provider_result(name, "error", detail=type(exc).__name__)
+        return await provider_result(
+            name, GEO_SEARCH_PROVIDER_ERROR, detail=type(exc).__name__
+        )
 
 
 async def google_get(client: httpx.AsyncClient, url: str) -> httpx.Response:
@@ -141,7 +155,8 @@ async def _google_rss_result(
             name, link or f"google-{index}", title, link, source,
             entry.findtext("description"), entry.findtext("pubDate"), marker,
         ))
-    return await provider_result(name, "success" if items else "empty", items)
+    status = GEO_SEARCH_STATUS_SUCCESS if items else GEO_SEARCH_PROVIDER_EMPTY
+    return await provider_result(name, status, items)
 
 
 async def _government_rss_result(
@@ -173,4 +188,5 @@ async def _government_rss_result(
             (entry.findtext("title") or "Government update").strip(),
             link, source, entry.findtext("description"), published_at, marker,
         ))
-    return await provider_result(name, "success" if items else "empty", items[:max_results])
+    status = GEO_SEARCH_STATUS_SUCCESS if items else GEO_SEARCH_PROVIDER_EMPTY
+    return await provider_result(name, status, items[:max_results])

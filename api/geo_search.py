@@ -7,7 +7,7 @@ from utils.logger import logger
 
 
 router = APIRouter(
-    prefix="/api/geo-search",
+    prefix="/geo-search",
     tags=["Geo Search"],
     dependencies=[Depends(get_current_user)],
 )
@@ -21,7 +21,10 @@ router = APIRouter(
 async def search_news(request: GeoSearchRequest) -> GeoSearchResponse:
     """Search current news relevant to a supplied geographic area."""
     logger.info(
-        "Geo news search requested | feature_id=%s | max_results=%s",
+        "Geo news search requested | case_id=%s | layer_id=%s | "
+        "feature_id=%s | max_results=%s",
+        request.case_id,
+        request.layer_id,
         request.feature_id,
         request.max_results,
     )

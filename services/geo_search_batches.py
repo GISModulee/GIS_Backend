@@ -11,6 +11,15 @@ from services.geo_search_utils import (
     parse_datetime,
     provider_result,
 )
+from utils.constants import (
+    GEO_SEARCH_BATCHES_FAILED,
+    GEO_SEARCH_BATCHES_PARTIAL,
+    GEO_SEARCH_PROVIDER_EMPTY,
+    GEO_SEARCH_PROVIDER_ERROR,
+    GEO_SEARCH_PROVIDER_RATE_LIMITED,
+    GEO_SEARCH_PROVIDER_TIMEOUT,
+    GEO_SEARCH_STATUS_SUCCESS,
+)
 
 BatchFetcher = Callable[
     [list[str], list[str], BaseGeometry, int, datetime | None, datetime | None],
@@ -47,18 +56,23 @@ async def fetch_in_place_batches(
         reverse=True,
     )
     items = [item for _, item in dated_items[:max_results]]
-    healthy = [result for result in results if result.status in {"success", "empty"}]
+    healthy = [
+        result for result in results
+        if result.status in {GEO_SEARCH_STATUS_SUCCESS, GEO_SEARCH_PROVIDER_EMPTY}
+    ]
     if healthy:
-        status = "success" if items else "empty"
-        detail = None if len(healthy) == len(results) else "Some place batches failed"
+        status = GEO_SEARCH_STATUS_SUCCESS if items else GEO_SEARCH_PROVIDER_EMPTY
+        detail = None if len(healthy) == len(results) else GEO_SEARCH_BATCHES_PARTIAL
     else:
         statuses = {result.status for result in results}
         status = (
-            "rate_limited" if statuses == {"rate_limited"}
-            else "timeout" if statuses == {"timeout"}
-            else "error"
+            GEO_SEARCH_PROVIDER_RATE_LIMITED
+            if statuses == {GEO_SEARCH_PROVIDER_RATE_LIMITED}
+            else GEO_SEARCH_PROVIDER_TIMEOUT
+            if statuses == {GEO_SEARCH_PROVIDER_TIMEOUT}
+            else GEO_SEARCH_PROVIDER_ERROR
         )
-        detail = "All place batches failed"
+        detail = GEO_SEARCH_BATCHES_FAILED
     return await provider_result(results[0].name, status, items, detail)
 
 
