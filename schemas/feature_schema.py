@@ -47,7 +47,7 @@ class FeatureResponse(BaseModel):
     id: int
     feature_number: int
     case_id: int
-    layer_id: int
+    layer_id: int | None = None
     name: str
     geometry_type: str
     radius: float | None = None

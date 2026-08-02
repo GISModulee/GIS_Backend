@@ -17,7 +17,7 @@ from utils.constants import (
 class GeoSearchRequest(BaseModel):
     case_id: int = Field(..., gt=0)
     layer_id: int = Field(..., gt=0)
-    feature_id: int = Field(..., gt=0)
+    feature_number: int = Field(..., gt=0)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     start_date: datetime | None = None
     end_date: datetime | None = None
@@ -82,7 +82,7 @@ class SourceStatus(BaseModel):
 class GeoSearchSelection(BaseModel):
     case_id: int
     layer_id: int
-    feature_id: int
+    feature_number: int
 
 
 class GeoSearchResponse(BaseModel):
