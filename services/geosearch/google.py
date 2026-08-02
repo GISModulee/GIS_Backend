@@ -7,9 +7,9 @@ from urllib.parse import quote, urlparse
 import httpx
 from shapely.geometry.base import BaseGeometry
 
-import services.geo_search_utils as state
-from services.geo_search_batches import fetch_in_place_batches
-from services.geo_search_utils import (
+import services.geosearch.utils as state
+from services.geosearch.batches import fetch_in_place_batches
+from services.geosearch.utils import (
     GDELT_QUERY_TERMS,
     REQUEST_TIMEOUT,
     USER_AGENT,

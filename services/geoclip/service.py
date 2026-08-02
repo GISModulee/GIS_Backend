@@ -10,21 +10,28 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from utils.config import settings
+from utils.constants import (
+    DATABASE_SAVE_FAILED,
+    GEOCLIP_NO_PREDICTIONS,
+    GEOCLIP_PREDICTION_FAILED,
+    GEOCLIP_TOP_K_RANGE_TEMPLATE,
+    IMAGE_NOT_FOUND,
+    IMAGE_READ_FAILED,
+    LAYER_NOT_FOUND,
+)
 from utils.logger import logger
 from utils.exceptions import (
     NotFoundError,
     BadRequestError,
-    ConflictError,
     ServiceUnavailableError,
     UnprocessableEntityError,
 )
 from models.model import Feature, ImageRecord, Layer
 from schemas.feature_schema import FeatureCreate
-from services.geoclip_processor import FileUtils, ImageProcessor
-from services.geoclip_validator import FileValidator
-from services.case_service import create_untitled_case
-from services.layer_service import create_layer, patch_layer
-from services.feature_service import create_feature
+from services.geoclip.processor import FileUtils, ImageProcessor
+from services.geoclip.validator import FileValidator
+from services.layer.layer_service import create_layer, patch_layer
+from services.feature.feature_service import create_feature
 
 # Sane bounds for a user-supplied top_k — prevents someone from
 # requesting e.g. top_k=100000 and hammering the model / DB.
@@ -42,7 +49,11 @@ def _validate_top_k(top_k: int | None) -> int:
 
     if top_k < MIN_TOP_K or top_k > MAX_TOP_K:
         raise UnprocessableEntityError(
-            f"top_k must be between {MIN_TOP_K} and {MAX_TOP_K} (got {top_k})."
+            GEOCLIP_TOP_K_RANGE_TEMPLATE.format(
+                min_top_k=MIN_TOP_K,
+                max_top_k=MAX_TOP_K,
+                top_k=top_k,
+            )
         )
 
     return top_k
@@ -50,6 +61,7 @@ def _validate_top_k(top_k: int | None) -> int:
 def upload_image(
     file: UploadFile,
     db: Session,
+    case_id: int,
     top_k: int | None = None,
     layer_name: str | None = None,
     created_by: int | None = None,
@@ -60,8 +72,8 @@ def upload_image(
     effective_top_k = _validate_top_k(top_k)
 
     logger.info(
-        f"Processing GeoCLIP upload | filename={file.filename} | top_k={effective_top_k} | "
-        f"layer_name={layer_name} | created_by={created_by}"
+        f"Processing GeoCLIP upload | case_id={case_id} | filename={file.filename} | "
+        f"top_k={effective_top_k} | layer_name={layer_name} | created_by={created_by}"
     )
 
     FileValidator.validate_extension(file.filename)
@@ -71,7 +83,7 @@ def upload_image(
         content = file.file.read()
     except Exception as e:
         logger.error(f"Failed to read uploaded file | filename={file.filename} | error={e}", exc_info=True)
-        raise BadRequestError("Unable to read uploaded file") from e
+        raise BadRequestError(IMAGE_READ_FAILED) from e
 
     # --- 3. Size validation ---
     FileValidator.validate_size(content, settings.MAX_FILE_SIZE_BYTES)
@@ -99,17 +111,14 @@ def upload_image(
         result = ImageProcessor.process_and_predict(content, real_extension, effective_top_k)
     except Exception as e:
         logger.error(f"Prediction failed | filename={file.filename} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("GeoCLIP prediction failed") from e
+        raise ServiceUnavailableError(GEOCLIP_PREDICTION_FAILED) from e
 
     if not result.get("predictions"):
         logger.error(f"No predictions returned | filename={file.filename}")
-        raise UnprocessableEntityError("No location predictions could be generated for this image.")
+        raise UnprocessableEntityError(GEOCLIP_NO_PREDICTIONS)
 
     predictions = result["predictions"]
     top_prediction = predictions[0]
-
-    # --- 7. Resolve a case (mirrors upload_service.extract_kml) ---
-    case_id = create_untitled_case(created_by)
 
     # --- 8. Create the layer via the shared layer_service ---
     layer_result = create_layer({
@@ -117,14 +126,14 @@ def upload_image(
         "name": layer_name if layer_name else "__pending__",
         "layer_type": "geoclip_prediction",
         "visible": True,
-    })
+    }, db)
     layer_id = layer_result["layer_id"]
 
     if layer_name:
         resolved_layer_name = layer_name
     else:
         resolved_layer_name = generate_layer_name(layer_id)
-        patch_layer(layer_id, {"name": resolved_layer_name})
+        patch_layer(layer_id, {"name": resolved_layer_name}, db)
 
     # --- 9. Create one Feature per prediction via the shared feature_service ---
     file_id = str(uuid.uuid4())
@@ -162,7 +171,7 @@ def upload_image(
             },
         )
 
-        feature_result = create_feature(feature_in, created_by)
+        feature_result = create_feature(feature_in, db, created_by)
         created_feature_ids.append(feature_result["feature_id"])
 
     
@@ -197,7 +206,7 @@ def upload_image(
                 "status": "already_processed",
             }
 
-        raise ServiceUnavailableError("Database save failed") from e
+        raise ServiceUnavailableError(DATABASE_SAVE_FAILED) from e
 
     elapsed = time.monotonic() - start_time
     logger.info(
@@ -229,7 +238,7 @@ def get_images_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> 
     layer_exists = db.query(Layer.id).filter(Layer.id == layer_id).first()
     if layer_exists is None:
         logger.warning(f"Get images by layer failed: layer not found | layer_id={layer_id}")
-        raise NotFoundError("Layer not found")
+        raise NotFoundError(LAYER_NOT_FOUND)
 
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
@@ -258,7 +267,7 @@ def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Session) -
     layer_exists = db.query(Layer.id).filter(Layer.id == layer_id).first()
     if layer_exists is None:
         logger.warning(f"Get features by layer failed: layer not found | layer_id={layer_id}")
-        raise NotFoundError("Layer not found")
+        raise NotFoundError(LAYER_NOT_FOUND)
 
     limit = max(1, min(limit, 2000))
     offset = max(0, offset)
@@ -309,7 +318,7 @@ def get_image(image_id: str, db: Session) -> Response:
 
     if not record:
         logger.warning(f"Image not found | image_id={image_id}")
-        raise NotFoundError("Image not found")
+        raise NotFoundError(IMAGE_NOT_FOUND)
 
     return Response(content=record.image_data, media_type=record.content_type or "image/jpeg")
 
@@ -325,7 +334,7 @@ def delete_layer(layer_id: int, db: Session) -> dict:
 
     if not layer:
         logger.warning(f"Layer not found | layer_id={layer_id}")
-        raise NotFoundError("Layer not found")
+        raise NotFoundError(LAYER_NOT_FOUND)
 
     layer_name = layer.name
 
@@ -336,55 +345,3 @@ def delete_layer(layer_id: int, db: Session) -> dict:
 
     logger.info(f"Layer deleted | id={layer_id} | name={layer_name} ")
     return {"id": layer_id, "name": layer_name, "status": "deleted"}
-
-
-# ===================================================
-# RENAME LAYER
-# ===================================================
-def rename_layer(layer_id: int, new_name: str, db: Session) -> dict:
-
-    logger.info(f"Renaming GeoCLIP layer | layer_id={layer_id} | new_name={new_name}")
-
-    new_name = new_name.strip()
-    if not new_name:
-        raise BadRequestError("Layer name cannot be empty")
-
-    layer = db.query(Layer).filter(Layer.id == layer_id).first()
-
-    if not layer:
-        logger.warning(f"Layer not found | layer_id={layer_id}")
-        raise NotFoundError("Layer not found")
-
-    duplicate = (
-        db.query(Layer.id)
-        .filter(
-            Layer.case_id == layer.case_id,
-            Layer.name == new_name,
-            Layer.id != layer_id,
-        )
-        .first()
-    )
-    if duplicate is not None:
-        logger.warning(
-            f"Layer rename rejected: duplicate name in case | "
-            f"layer_id={layer_id} | case_id={layer.case_id} | name={new_name}"
-        )
-        raise ConflictError(
-            f"A layer named '{new_name}' already exists in this case. "
-            "Choose a different name."
-        )
-
-    layer.name = new_name
-    try:
-        db.commit()
-    except IntegrityError as e:
-        db.rollback()
-        if getattr(getattr(e, "orig", None), "pgcode", None) == "23505":
-            raise ConflictError(
-                f"A layer named '{new_name}' already exists in this case. "
-                "Choose a different name."
-            ) from e
-        raise
-
-    logger.info(f"Layer renamed | id={layer_id} | new_name={new_name}")
-    return {"id": layer_id, "name": new_name, "status": "renamed"}

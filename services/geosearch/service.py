@@ -8,12 +8,12 @@ from schemas.geo_search_schema import (
     GeoSearchSelection,
     SourceStatus,
 )
-from services.geo_search_gdelt import fetch_gdelt
-from services.geo_search_geometry import area_context, feature_geometry
-from services.geo_search_google import fetch_google_news, fetch_government_news
-from services.geo_search_places import discover_places
-from services.geo_search_ranking import rank_filter_and_deduplicate
-from services.geo_search_utils import (
+from services.geosearch.gdelt import fetch_gdelt
+from services.geosearch.geometry import area_context, feature_geometry
+from services.geosearch.google import fetch_google_news, fetch_government_news
+from services.geosearch.places import discover_places
+from services.geosearch.ranking import rank_filter_and_deduplicate
+from services.geosearch.utils import (
     MAX_DISCOVERED_PLACES,
     PROVIDER_CANDIDATE_LIMIT,
     government_domains,
@@ -42,7 +42,7 @@ class GeoSearchService:
     ) -> GeoSearchResponse:
         started_at = time.perf_counter()
         geometry = await feature_geometry(
-            request.case_id, request.layer_id, request.feature_id
+            request.case_id, request.layer_id, request.feature_number
         )
         area, place_result = await asyncio.gather(
             area_context(geometry),
@@ -110,7 +110,7 @@ class GeoSearchService:
             selection=GeoSearchSelection(
                 case_id=request.case_id,
                 layer_id=request.layer_id,
-                feature_id=request.feature_id,
+                feature_number=request.feature_number,
             ),
             area=area,
             sources=sources,

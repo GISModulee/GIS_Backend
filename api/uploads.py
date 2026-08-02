@@ -1,6 +1,9 @@
 from fastapi import APIRouter, Depends, UploadFile, File, Form
+from sqlalchemy.orm import Session
 
-from services.upload_service import process_upload
+from database.database import get_db
+from services.upload_data.upload_service import process_upload
+from schemas.upload_schema import UploadResponse
 from utils.dependencies import require_roles
 from utils.roles import CAN_UPLOAD
 from utils.logger import logger
@@ -11,7 +14,7 @@ router = APIRouter(
 )
 
 
-@router.post("/import")
+@router.post("/import", response_model=UploadResponse)
 async def upload_file(
     case_id: Annotated[int, Form(...)],
     file: Annotated[UploadFile, File()],
@@ -19,6 +22,7 @@ async def upload_file(
         dict,
         Depends(require_roles(CAN_UPLOAD)),
     ],
+    db: Annotated[Session, Depends(get_db)],
     layer_name: Annotated[
         str | None,
         Form(
@@ -41,6 +45,7 @@ async def upload_file(
     return await process_upload(
         case_id=case_id,
         file=file,
+        db=db,
         layer_name=layer_name,
         created_by=current_user["user_id"],
     )

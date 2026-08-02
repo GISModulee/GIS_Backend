@@ -33,9 +33,4 @@ class Settings(BaseSettings):
     def LOG_PATH(self) -> Path:
         return Path(self.LOG_DIR)
 
-    @property
-    def allowed_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
-
-
 settings = Settings()

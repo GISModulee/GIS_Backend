@@ -9,11 +9,23 @@ import rasterio
 from fastapi import UploadFile
 
 from schemas.feature_schema import FeatureCreate
-from services.feature_service import create_feature
-from services.case_service import create_untitled_case
-from services.layer_service import (
+from services.feature.feature_service import create_feature
+from services.layer.layer_service import (
     create_import_layer,
     get_import_layer_by_hash,
+)
+from utils.constants import (
+    CASE_ID_REQUIRED,
+    CSV_PARSE_FAILED_TEMPLATE,
+    FILE_NAME_INVALID,
+    GEOJSON_FEATURES_ARRAY_INVALID,
+    IMPLEMENTATION_MISSING,
+    JSON_GEOJSON_EXPECTED,
+    JSON_OBJECT_EXPECTED,
+    JSON_PARSE_FAILED_TEMPLATE,
+    KML_PARSE_FAILED_TEMPLATE,
+    TIFF_READ_FAILED_TEMPLATE,
+    UPLOAD_TYPE_UNSUPPORTED_TEMPLATE,
 )
 from utils.logger import logger
 from utils.exceptions import BadRequestError, NotImplementedError_, UnsupportedMediaTypeError, UnprocessableEntityError
@@ -42,7 +54,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 def _sanitize_filename(filename: str) -> str:
     base = os.path.basename((filename or "").replace("\\", "/"))
     if not base or base in (".", ".."):
-        raise BadRequestError("Invalid filename")
+        raise BadRequestError(FILE_NAME_INVALID)
     return f"{uuid.uuid4().hex}_{base}"
 
 
@@ -54,9 +66,9 @@ def _sanitize_filename(filename: str) -> str:
 # create a single layer for the file. Pulled out here so there's one
 # implementation to maintain instead of copy-pasting in each class.
 
-def _resolve_case_id(case_id, created_by):
+def _resolve_case_id(case_id, _created_by):
     if case_id is None:
-        case_id = create_untitled_case(created_by)
+        raise BadRequestError(CASE_ID_REQUIRED)
     return case_id
 
 
@@ -65,12 +77,12 @@ def _hash_file(file_path):
         return hashlib.sha256(f.read()).hexdigest()
 
 
-def _check_duplicate_import(case_id, file_hash, source_label):
+def _check_duplicate_import(case_id, file_hash, source_label, db):
     """
     Returns the short-circuit response dict if this exact file was
     already imported into this case, else None.
     """
-    existing_layer = get_import_layer_by_hash(case_id, file_hash)
+    existing_layer = get_import_layer_by_hash(case_id, file_hash, db)
 
     if not existing_layer:
         return None
@@ -149,7 +161,7 @@ def remove_z_coordinates(geometry):
     return geometry
 
 
-def _ingest_features(case_id, layer_id, feature_iter, created_by):
+def _ingest_features(case_id, layer_id, feature_iter, created_by, db):
     """
     feature_iter yields (name, geometry, properties) tuples for each
     feature to import. Returns the count of features imported.
@@ -172,7 +184,7 @@ def _ingest_features(case_id, layer_id, feature_iter, created_by):
             properties=properties,
         )
 
-        create_feature(feature, created_by)
+        create_feature(feature, db, created_by)
 
         imported += 1
 
@@ -190,9 +202,9 @@ def _ingest_features(case_id, layer_id, feature_iter, created_by):
 # touching process_upload() or the other extractors again.
 
 class BaseExtractor:
-    def extract(self, *, file_path, filename, case_id, layer_name, created_by):
+    def extract(self, *, file_path, filename, case_id, layer_name, created_by, db):
         raise NotImplementedError_(
-            "Subclasses of BaseExtractor must override extract()"
+            IMPLEMENTATION_MISSING
         )
 
 
@@ -202,7 +214,7 @@ class CSVExtractor(BaseExtractor):
             df = pd.read_csv(file_path)
         except Exception as e:
             logger.error(f"Failed to parse CSV | file_path={file_path} | error={e}", exc_info=True)
-            raise UnprocessableEntityError(f"Failed to parse CSV: {e}") from e
+            raise UnprocessableEntityError(CSV_PARSE_FAILED_TEMPLATE.format(reason=e)) from e
 
         return {
             "columns": list(df.columns),
@@ -215,13 +227,13 @@ class KMLExtractor(BaseExtractor):
     # `layer_name`: optional. If provided, used as-is for the new
     # import layer. If omitted, derives the name from the uploaded
     # file's basename.
-    def extract(self, *, file_path, filename, case_id, layer_name, created_by):
+    def extract(self, *, file_path, filename, case_id, layer_name, created_by, db):
 
         case_id = _resolve_case_id(case_id, created_by)
 
         file_hash = _hash_file(file_path)
 
-        duplicate_response = _check_duplicate_import(case_id, file_hash, "KML")
+        duplicate_response = _check_duplicate_import(case_id, file_hash, "KML", db)
         if duplicate_response:
             return duplicate_response
 
@@ -229,14 +241,15 @@ class KMLExtractor(BaseExtractor):
             gdf = gpd.read_file(file_path)
         except Exception as e:
             logger.error(f"Failed to parse KML | case_id={case_id} | filename={filename} | error={e}", exc_info=True)
-            raise UnprocessableEntityError(f"Failed to parse KML file: {e}") from e
+            raise UnprocessableEntityError(KML_PARSE_FAILED_TEMPLATE.format(reason=e)) from e
 
         resolved_layer_name = _resolve_layer_name(layer_name, filename)
 
         layer_response = create_import_layer(
             case_id=case_id,
             name=resolved_layer_name,
-            file_hash=file_hash
+            file_hash=file_hash,
+            db=db
         )
 
         layer_id = layer_response["layer_id"]
@@ -250,7 +263,7 @@ class KMLExtractor(BaseExtractor):
                 properties = row.drop(labels="geometry").fillna("").to_dict()
                 yield name, geometry, properties
 
-        imported = _ingest_features(case_id, layer_id, _kml_features(), created_by)
+        imported = _ingest_features(case_id, layer_id, _kml_features(), created_by, db)
 
         return {
             "success": True,
@@ -269,13 +282,13 @@ class GeoJSONExtractor(BaseExtractor):
     # one create_feature call per feature) but parses natively with
     # `json` instead of geopandas, since GeoJSON needs no driver
     # detection.
-    def extract(self, *, file_path, filename, case_id, layer_name, created_by):
+    def extract(self, *, file_path, filename, case_id, layer_name, created_by, db):
 
         case_id = _resolve_case_id(case_id, created_by)
 
         file_hash = _hash_file(file_path)
 
-        duplicate_response = _check_duplicate_import(case_id, file_hash, "JSON")
+        duplicate_response = _check_duplicate_import(case_id, file_hash, "JSON", db)
         if duplicate_response:
             return duplicate_response
 
@@ -284,11 +297,11 @@ class GeoJSONExtractor(BaseExtractor):
                 geojson = json.load(f)
         except Exception as e:
             logger.error(f"Failed to parse JSON | case_id={case_id} | filename={filename} | error={e}", exc_info=True)
-            raise UnprocessableEntityError(f"Failed to parse JSON file: {e}") from e
+            raise UnprocessableEntityError(JSON_PARSE_FAILED_TEMPLATE.format(reason=e)) from e
 
         if not isinstance(geojson, dict):
             raise UnprocessableEntityError(
-                "Unsupported JSON structure: expected a JSON object"
+                JSON_OBJECT_EXPECTED
             )
 
         json_type = geojson.get("type")
@@ -321,12 +334,12 @@ class GeoJSONExtractor(BaseExtractor):
             }]
         else:
             raise UnprocessableEntityError(
-                "Unsupported JSON structure: expected GeoJSON or a single_shape geometry"
+                JSON_GEOJSON_EXPECTED
             )
 
         if not isinstance(raw_features, list):
             raise UnprocessableEntityError(
-                "Invalid GeoJSON: features must be an array"
+                GEOJSON_FEATURES_ARRAY_INVALID
             )
 
         resolved_layer_name = _resolve_layer_name(layer_name, filename)
@@ -334,7 +347,8 @@ class GeoJSONExtractor(BaseExtractor):
         layer_response = create_import_layer(
             case_id=case_id,
             name=resolved_layer_name,
-            file_hash=file_hash
+            file_hash=file_hash,
+            db=db
         )
 
         layer_id = layer_response["layer_id"]
@@ -350,7 +364,7 @@ class GeoJSONExtractor(BaseExtractor):
                 name = properties.get("Name") or properties.get("name")
                 yield name, geometry, properties
 
-        imported = _ingest_features(case_id, layer_id, _geojson_features(), created_by)
+        imported = _ingest_features(case_id, layer_id, _geojson_features(), created_by, db)
 
         return {
             "success": True,
@@ -380,7 +394,7 @@ class TiffExtractor(BaseExtractor):
                 }
         except Exception as e:
             logger.error(f"Failed to read TIFF | file_path={file_path} | error={e}", exc_info=True)
-            raise UnprocessableEntityError(f"Failed to read TIFF file: {e}") from e
+            raise UnprocessableEntityError(TIFF_READ_FAILED_TEMPLATE.format(reason=e)) from e
 
 
 # Registry: extension -> extractor instance. Add a new file type by
@@ -403,6 +417,7 @@ EXTRACTOR_REGISTRY = {
 async def process_upload(
     case_id: int,
     file: UploadFile,
+    db,
     layer_name: str | None = None,
     created_by: int | None = None,
 ):
@@ -417,7 +432,7 @@ async def process_upload(
 
     extractor = EXTRACTOR_REGISTRY.get(extension)
     if extractor is None:
-        raise UnsupportedMediaTypeError(f"Unsupported file type: {extension}")
+        raise UnsupportedMediaTypeError(UPLOAD_TYPE_UNSUPPORTED_TEMPLATE.format(extension=extension))
 
     data = extractor.extract(
         file_path=file_path,
@@ -425,6 +440,7 @@ async def process_upload(
         case_id=case_id,
         layer_name=layer_name,
         created_by=created_by,
+        db=db,
     )
 
     return {

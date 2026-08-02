@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 from shapely.geometry.base import BaseGeometry
 
-import services.geo_search_utils as state
-from services.geo_search_utils import (
+import services.geosearch.utils as state
+from services.geosearch.utils import (
     GDELT_QUERY_TERMS,
     GDELT_TIMEOUT,
     GDELT_URLS,

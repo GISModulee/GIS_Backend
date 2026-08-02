@@ -1,13 +1,17 @@
 from fastapi import APIRouter, Depends, Form, File, UploadFile, WebSocket, WebSocketDisconnect
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
  
-from services.comment_service import (
+from database.database import get_db
+from services.comment.comment_service import (
     create_comment,
     get_feature_comments,
     get_comment_attachment,
     get_case_comments
 )
-from services.comment_websocket_manager import comment_connection_manager
+from services.comment.comment_websocket_manager import comment_connection_manager
+from schemas.comment_schema import CommentCreateResponse, CommentResponse
+from utils.constants import WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.auth_utils import decode_access_token
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_COMMENT
@@ -17,7 +21,7 @@ router = APIRouter(
     tags=["Comments"]
 )
  
-@router.post("/comments")
+@router.post("/comments", response_model=CommentCreateResponse)
 async def add_comment(
     case_id: int = Form(...),
     feature_number: int = Form(...),
@@ -52,10 +56,11 @@ async def add_comment(
     )
     return result
  
-@router.get("/cases/{case_id}/features/{feature_number}/comments")
+@router.get("/cases/{case_id}/features/{feature_number}/comments", response_model=list[CommentResponse])
 def list_feature_comments(
     case_id: int,
     feature_number: int,
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
  
@@ -63,22 +68,23 @@ def list_feature_comments(
         f"GET /cases/{case_id}/features/{feature_number}/comments | user_id={current_user['user_id']}"
     )
  
-    return get_feature_comments(case_id, feature_number)
+    return get_feature_comments(case_id, feature_number, db)
  
 @router.get("/comments/{comment_id}/attachment")
-def fetch_comment_attachment(comment_id: int, current_user=Depends(get_current_user)):
+def fetch_comment_attachment(comment_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
  
     logger.info(f"GET /comments/{comment_id}/attachment | user_id={current_user['user_id']}")
  
-    return get_comment_attachment(comment_id)
+    return get_comment_attachment(comment_id, db)
  
 # ===================================================
 # GET COMMENTS OF A CASE
 # ===================================================
  
-@router.get("/cases/{case_id}/comments")
+@router.get("/cases/{case_id}/comments", response_model=list[CommentResponse])
 def list_case_comments(
     case_id: int,
+    db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
  
@@ -86,7 +92,7 @@ def list_case_comments(
         f"GET /cases/{case_id}/comments | user_id={current_user['user_id']}"
     )
  
-    return get_case_comments(case_id)
+    return get_case_comments(case_id, db)
  
  
 @router.websocket("/ws/cases/{case_id}/features/{feature_number}/comments")
@@ -100,7 +106,7 @@ async def feature_comment_updates(websocket: WebSocket, case_id: int, feature_nu
             case_id,
             feature_number,
         )
-        await websocket.close(code=1008, reason="Authentication required")
+        await websocket.close(code=WEBSOCKET_POLICY_VIOLATION, reason=WEBSOCKET_AUTH_REQUIRED)
         return
  
     await comment_connection_manager.connect(case_id, feature_number, websocket)

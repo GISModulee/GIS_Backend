@@ -11,8 +11,9 @@ from starlette.concurrency import run_in_threadpool
 
 from database.database import SessionLocal
 from models.model import Feature
-from services.geo_search_utils import MAX_AREA_SQUARE_DEGREES, REQUEST_TIMEOUT, USER_AGENT
+from services.geosearch.utils import MAX_AREA_SQUARE_DEGREES, REQUEST_TIMEOUT, USER_AGENT
 from utils.constants import (
+    GEOMETRY_VALIDITY_TEMPLATE,
     GEO_SEARCH_AREA_TOO_LARGE,
     GEO_SEARCH_FEATURE_BOUNDS_INVALID,
     GEO_SEARCH_FEATURE_EMPTY_GEOMETRY,
@@ -31,15 +32,15 @@ from utils.logger import logger
 
 
 async def feature_geometry(
-    case_id: int, layer_id: int, feature_id: int
+    case_id: int, layer_id: int, feature_number: int
 ) -> BaseGeometry:
     logger.info(
-        "Loading Geo Search feature | case_id=%s | layer_id=%s | feature_id=%s",
+        "Loading Geo Search feature | case_id=%s | layer_id=%s | feature_number=%s",
         case_id,
         layer_id,
-        feature_id,
+        feature_number,
     )
-    row = await run_in_threadpool(_feature_row, case_id, layer_id, feature_id)
+    row = await run_in_threadpool(_feature_row, case_id, layer_id, feature_number)
     if row is None:
         raise NotFoundError(GEO_SEARCH_FEATURE_NOT_FOUND)
     if not row.geometry:
@@ -47,18 +48,21 @@ async def feature_geometry(
     try:
         geometry = shape(json.loads(row.geometry))
     except (TypeError, ValueError) as exc:
-        logger.error("Stored feature geometry is invalid | feature_id=%s", feature_id)
+        logger.error(
+            "Stored feature geometry is invalid | feature_number=%s",
+            feature_number,
+        )
         raise UnprocessableEntityError(GEO_SEARCH_FEATURE_INVALID_GEOMETRY) from exc
     return await validate_geometry(geometry)
 
 
-def _feature_row(case_id: int, layer_id: int, feature_id: int):
+def _feature_row(case_id: int, layer_id: int, feature_number: int):
     try:
         with SessionLocal() as db:
             return db.execute(
                 select(Feature.id, func.ST_AsGeoJSON(Feature.geom).label("geometry"))
                 .where(
-                    Feature.id == feature_id,
+                    Feature.feature_number == feature_number,
                     Feature.layer_id == layer_id,
                     Feature.case_id == case_id,
                 )
@@ -66,10 +70,10 @@ def _feature_row(case_id: int, layer_id: int, feature_id: int):
     except SQLAlchemyError as exc:
         logger.error(
             "Failed to load Geo Search feature | case_id=%s | layer_id=%s | "
-            "feature_id=%s | error=%s",
+            "feature_number=%s | error=%s",
             case_id,
             layer_id,
-            feature_id,
+            feature_number,
             exc,
             exc_info=True,
         )
@@ -81,7 +85,10 @@ async def validate_geometry(geometry: BaseGeometry) -> BaseGeometry:
         raise UnprocessableEntityError(GEO_SEARCH_FEATURE_EMPTY_SHAPE)
     if not geometry.is_valid:
         raise UnprocessableEntityError(
-            f"{GEO_SEARCH_FEATURE_INVALID_GEOMETRY}: {explain_validity(geometry)}"
+            GEOMETRY_VALIDITY_TEMPLATE.format(
+                detail=GEO_SEARCH_FEATURE_INVALID_GEOMETRY,
+                reason=explain_validity(geometry),
+            )
         )
     min_lon, min_lat, max_lon, max_lat = geometry.bounds
     if not (-180 <= min_lon <= max_lon <= 180 and -90 <= min_lat <= max_lat <= 90):

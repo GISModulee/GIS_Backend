@@ -5,7 +5,7 @@ import tempfile
 
 from PIL import Image, ExifTags
 
-from services.geoclip_model import geo_model
+from services.geoclip.model import geo_model
 from utils.logger import logger
 
 class FileUtils:

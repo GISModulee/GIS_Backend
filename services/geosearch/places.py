@@ -7,7 +7,7 @@ import httpx
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
-from services.geo_search_utils import (
+from services.geosearch.utils import (
     MAX_DISCOVERED_PLACES,
     OVERPASS_TIMEOUT_SECONDS,
     OVERPASS_URLS,

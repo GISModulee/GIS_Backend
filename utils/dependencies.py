@@ -4,6 +4,12 @@ from fastapi import Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from utils.auth_utils import decode_access_token
+from utils.constants import (
+    AUTH_CREDENTIALS_MISSING,
+    AUTH_ROLE_FORBIDDEN,
+    AUTH_TOKEN_INVALID_OR_EXPIRED,
+    AUTH_TOKEN_PAYLOAD_INVALID,
+)
 from utils.exceptions import UnauthorizedError, ForbiddenError
 from utils.logger import logger
 
@@ -14,14 +20,14 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security)
 ):
     if credentials is None:
-        raise UnauthorizedError("Authentication credentials were not provided.")
+        raise UnauthorizedError(AUTH_CREDENTIALS_MISSING)
 
     token = credentials.credentials
 
     payload = decode_access_token(token)
 
     if payload is None:
-        raise UnauthorizedError("Invalid or expired token.")
+        raise UnauthorizedError(AUTH_TOKEN_INVALID_OR_EXPIRED)
 
     user_id = payload.get("user_id")
     email = payload.get("sub")
@@ -29,7 +35,7 @@ def get_current_user(
 
     if user_id is None or email is None:
         logger.warning(f"Malformed JWT payload | payload={payload}")
-        raise UnauthorizedError("Invalid token payload.")
+        raise UnauthorizedError(AUTH_TOKEN_PAYLOAD_INVALID)
 
     return {
         "user_id": user_id,
@@ -47,7 +53,7 @@ def require_roles(allowed_roles: List[str]):
                 f"Permission denied | user={current_user['email']} "
                 f"role={current_user['role']} | required={allowed_roles}"
             )
-            raise ForbiddenError("You do not have permission to perform this action.")
+            raise ForbiddenError(AUTH_ROLE_FORBIDDEN)
 
         return current_user
 

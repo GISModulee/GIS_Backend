@@ -6,7 +6,7 @@ from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 
 from schemas.geo_search_schema import NewsItem
-from services.geo_search_utils import RawNewsItem, parse_datetime
+from services.geosearch.utils import RawNewsItem, parse_datetime
 
 
 async def rank_filter_and_deduplicate(

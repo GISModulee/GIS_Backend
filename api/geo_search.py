@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 
 from schemas.geo_search_schema import GeoSearchRequest, GeoSearchResponse
-from services.geo_search_service import GeoSearchService
+from services.geosearch.service import GeoSearchService
+from utils.constants import STATUS_OK
 from utils.dependencies import get_current_user
 from utils.logger import logger
 
@@ -16,7 +17,7 @@ router = APIRouter(
 @router.post(
     "/news",
     response_model=GeoSearchResponse,
-    status_code=status.HTTP_200_OK,
+    status_code=STATUS_OK,
 )
 async def search_news(request: GeoSearchRequest) -> GeoSearchResponse:
     """Search current news relevant to a supplied geographic area."""

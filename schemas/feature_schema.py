@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from datetime import datetime
+
+from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
 
 
@@ -22,7 +24,7 @@ class FeatureCreate(BaseModel):
     center: Optional[Dict[str, float]] = None
     radius: Optional[float] = None
 
-    properties: Dict[str, Any] = {}
+    properties: Dict[str, Any] = Field(default_factory=dict)
 
     # NOTE: `created_by` intentionally NOT accepted from the client.
     # It's derived server-side from the authenticated user
@@ -39,3 +41,31 @@ class FeatureCreate(BaseModel):
 class FeaturePatch(BaseModel):
     name: Optional[str] = None
     properties: Optional[Dict[str, Any]] = None
+
+
+class FeatureResponse(BaseModel):
+    id: int
+    feature_number: int
+    case_id: int
+    layer_id: int
+    name: str
+    geometry_type: str
+    radius: float | None = None
+    geometry: Dict[str, Any] | None = None
+    properties: Dict[str, Any] | None = None
+    created_by: int | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class FeatureCreateResponse(BaseModel):
+    success: bool
+    feature_id: int
+    feature_number: int
+    case_id: int
+    layer_id: int
+
+
+class FeatureActionResponse(BaseModel):
+    success: bool
+    message: str

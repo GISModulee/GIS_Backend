@@ -1,6 +1,6 @@
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from database.database import get_db
@@ -10,7 +10,7 @@ from schemas.geoclip_schema import (
     ImageUploadResponse,
     LayerActionResponse,
 )
-from services.geoclip_service import (
+from services.geoclip.service import (
     delete_layer as delete_layer_service,
     get_features_by_layer as get_features_by_layer_service,
     get_image as get_image_service,
@@ -62,8 +62,8 @@ def get_images_by_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(get_current_user),
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """Paginated: defaults to 100 rows per page, use ?limit=&offset= to page."""
     logger.info(
@@ -81,8 +81,8 @@ def get_features_by_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(get_current_user),
-    limit: int = 500,
-    offset: int = 0,
+    limit: int = Query(500, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
 ):
     logger.info(
         f"GET /layers/{layer_id}/features | user_id={current_user['user_id']} | "

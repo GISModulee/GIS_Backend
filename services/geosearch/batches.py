@@ -4,7 +4,7 @@ from typing import Awaitable, Callable
 
 from shapely.geometry.base import BaseGeometry
 
-from services.geo_search_utils import (
+from services.geosearch.utils import (
     PLACE_BATCH_SIZE,
     PROVIDER_CONCURRENCY,
     ProviderResult,

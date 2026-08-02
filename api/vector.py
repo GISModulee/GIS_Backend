@@ -7,7 +7,7 @@ from schemas.vector_schema import (
     VectorOperation
 )
 
-from services.vector_services import (
+from services.vector.vector_services import (
     convex_hull,
     union_features,
     intersection_features,

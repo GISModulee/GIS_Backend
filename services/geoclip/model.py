@@ -1,6 +1,11 @@
 import threading
 from geoclip import GeoCLIP
 from utils.config import settings
+from utils.constants import (
+    GEOCLIP_MODEL_INFERENCE_FAILED,
+    GEOCLIP_MODEL_INIT_FAILED,
+    GEOCLIP_MODEL_NOT_LOADED,
+)
 from utils.logger import logger
 
 
@@ -34,13 +39,11 @@ class GeoCLIPService:
             logger.info("GeoCLIP model loaded successfully.")
         except Exception as e:
             logger.error(f"Failed to load GeoCLIP model: {e}", exc_info=True)
-            raise RuntimeError("GeoCLIP model initialization failed.") from e
+            raise RuntimeError(GEOCLIP_MODEL_INIT_FAILED) from e
 
     def predict(self, image_path: str, top_k: int | None = None) -> list[dict]:
         if not self._loaded or self.model is None:
-            raise RuntimeError(
-                "GeoCLIP model is not loaded. Ensure load_model() is called at startup."
-            )
+            raise RuntimeError(GEOCLIP_MODEL_NOT_LOADED)
 
         effective_top_k = top_k if top_k is not None else settings.GEOCLIP_TOP_K
 
@@ -52,7 +55,7 @@ class GeoCLIPService:
                 )
         except Exception as e:
             logger.error(f"GeoCLIP inference failed: {e}", exc_info=True)
-            raise RuntimeError("GeoCLIP inference failed.") from e
+            raise RuntimeError(GEOCLIP_MODEL_INFERENCE_FAILED) from e
 
         predictions = [
             {

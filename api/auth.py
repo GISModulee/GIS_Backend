@@ -7,7 +7,7 @@ from schemas.auth_schema import (
     TokenResponse,
     CurrentUserResponse,
 )
-from services.auth_service import (
+from services.auth.service import (
     register_user,
     login_user
 )
@@ -30,6 +30,6 @@ def login(user: LoginUser):
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-def get_me(current_user=Depends(get_current_user)):
+async def get_me(current_user=Depends(get_current_user)):
     logger.info(f"GET /me | user_id={current_user['user_id']}")
     return current_user

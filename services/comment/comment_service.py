@@ -6,9 +6,19 @@ from sqlalchemy.exc import SQLAlchemyError
 from database.database import SessionLocal
 from models.model import Comment, User, Feature, Case
 from utils.config import settings
+from utils.constants import (
+    CASE_NOT_FOUND,
+    COMMENT_ATTACHMENT_FETCH_FAILED,
+    COMMENT_ATTACHMENT_NOT_FOUND,
+    COMMENT_CREATE_FAILED,
+    COMMENT_DELETE_FAILED,
+    COMMENT_FETCH_FAILED,
+    COMMENT_NOT_FOUND,
+    FEATURE_NOT_FOUND,
+)
 from utils.logger import logger
 from utils.exceptions import NotFoundError, ServiceUnavailableError
-from services.comment_validator import CommentAttachmentValidator
+from services.comment.comment_validator import CommentAttachmentValidator
  
  
 # ===================================================
@@ -68,7 +78,7 @@ def create_comment(case_id, feature_number, user_id, comment, attachment: Upload
                     f"Create comment failed: feature not found | case_id={case_id} | "
                     f"feature_number={feature_number}"
                 )
-                raise NotFoundError("Feature not found")
+                raise NotFoundError(FEATURE_NOT_FOUND)
  
             new_comment = Comment(
                 feature_id=feature.id,
@@ -92,7 +102,7 @@ def create_comment(case_id, feature_number, user_id, comment, attachment: Upload
             f"Failed to create comment | case_id={case_id} | feature_number={feature_number} | error={e}",
             exc_info=True
         )
-        raise ServiceUnavailableError("Failed to create comment") from e
+        raise ServiceUnavailableError(COMMENT_CREATE_FAILED) from e
  
     logger.info(
         f"Comment created | comment_id={comment_id} | case_id={case_id} | feature_number={feature_number}"
@@ -125,57 +135,56 @@ def create_comment(case_id, feature_number, user_id, comment, attachment: Upload
 # from a real feature with zero comments. Now verifies the feature
 # exists first and raises NotFoundError (404) if not.
  
-def get_feature_comments(case_id, feature_number):
+def get_feature_comments(case_id, feature_number, db):
  
     logger.info(f"Fetching comments | case_id={case_id} | feature_number={feature_number}")
  
     try:
-        with SessionLocal() as db:
-            feature = db.scalar(
-                select(Feature).where(
-                    Feature.case_id == case_id,
-                    Feature.feature_number == feature_number,
-                )
+        feature = db.scalar(
+            select(Feature).where(
+                Feature.case_id == case_id,
+                Feature.feature_number == feature_number,
             )
-            if feature is None:
-                logger.warning(
-                    f"Get feature comments failed: feature not found | case_id={case_id} | "
-                    f"feature_number={feature_number}"
-                )
-                raise NotFoundError("Feature not found")
+        )
+        if feature is None:
+            logger.warning(
+                f"Get feature comments failed: feature not found | case_id={case_id} | "
+                f"feature_number={feature_number}"
+            )
+            raise NotFoundError(FEATURE_NOT_FOUND)
  
-            result = db.execute(
-                select(
-                    Comment.id,
-                    Comment.user_id,
-                    User.full_name.label("user_full_name"),
-                    User.username.label("user_username"),
-                    User.role.label("user_role"),
-                    Comment.comment,
-                    Comment.attachment_filename,
-                    Comment.attachment_content_type,
-                    Comment.created_at,
-                )
-                .outerjoin(User, User.id == Comment.user_id)
-                .where(Comment.feature_id == feature.id)
-                .order_by(Comment.created_at.asc())
+        result = db.execute(
+            select(
+                Comment.id,
+                Comment.user_id,
+                User.full_name.label("user_full_name"),
+                User.username.label("user_username"),
+                User.role.label("user_role"),
+                Comment.comment,
+                Comment.attachment_filename,
+                Comment.attachment_content_type,
+                Comment.created_at,
             )
-            comments = []
-            for row in result:
-                comments.append({
-                    "id": row.id,
-                    "case_id": case_id,
-                    "feature_number": feature_number,
-                    "user_id": row.user_id,
-                    "user_full_name": row.user_full_name,
-                    "user_username": row.user_username,
-                    "user_role": row.user_role,
-                    "comment": row.comment,
-                    "has_attachment": row.attachment_filename is not None,
-                    "attachment_filename": row.attachment_filename,
-                    "attachment_content_type": row.attachment_content_type,
-                    "created_at": row.created_at
-                })
+            .outerjoin(User, User.id == Comment.user_id)
+            .where(Comment.feature_id == feature.id)
+            .order_by(Comment.created_at.asc())
+        )
+        comments = []
+        for row in result:
+            comments.append({
+                "id": row.id,
+                "case_id": case_id,
+                "feature_number": feature_number,
+                "user_id": row.user_id,
+                "user_full_name": row.user_full_name,
+                "user_username": row.user_username,
+                "user_role": row.user_role,
+                "comment": row.comment,
+                "has_attachment": row.attachment_filename is not None,
+                "attachment_filename": row.attachment_filename,
+                "attachment_content_type": row.attachment_content_type,
+                "created_at": row.created_at
+            })
  
     except NotFoundError:
         raise
@@ -185,7 +194,7 @@ def get_feature_comments(case_id, feature_number):
             f"Failed to fetch comments | case_id={case_id} | feature_number={feature_number} | error={e}",
             exc_info=True
         )
-        raise ServiceUnavailableError("Failed to fetch comments") from e
+        raise ServiceUnavailableError(COMMENT_FETCH_FAILED) from e
  
     return comments
  
@@ -196,33 +205,6 @@ def get_feature_comments(case_id, feature_number):
 # NOTE: not currently wired to any route in api/comments.py — flagging
 # as dead code per your request rather than silently changing routing.
 # Exception handling here is already correct and needs no fix.
- 
-def update_comment(comment_id, comment):
- 
-    logger.info(f"Updating comment | comment_id={comment_id}")
- 
-    try:
-        with SessionLocal.begin() as db:
-            existing = db.get(Comment, comment_id)
-            if existing is None:
-                logger.warning(f"Update comment failed: not found | comment_id={comment_id}")
-                raise NotFoundError("Comment not found")
-            existing.comment = comment.comment
- 
-    except NotFoundError:
-        raise
- 
-    except SQLAlchemyError as e:
-        logger.error(f"Failed to update comment | comment_id={comment_id} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to update comment") from e
- 
-    logger.info(f"Comment updated | comment_id={comment_id}")
- 
-    return {
-        "success": True,
-        "message": "Comment updated successfully"
-    }
- 
  
 # ===================================================
 # DELETE COMMENT
@@ -240,7 +222,7 @@ def delete_comment(comment_id):
             existing = db.get(Comment, comment_id)
             if existing is None:
                 logger.warning(f"Delete comment failed: not found | comment_id={comment_id}")
-                raise NotFoundError("Comment not found")
+                raise NotFoundError(COMMENT_NOT_FOUND)
             db.delete(existing)
  
     except NotFoundError:
@@ -248,7 +230,7 @@ def delete_comment(comment_id):
  
     except SQLAlchemyError as e:
         logger.error(f"Failed to delete comment | comment_id={comment_id} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to delete comment") from e
+        raise ServiceUnavailableError(COMMENT_DELETE_FAILED) from e
  
     logger.info(f"Comment deleted | comment_id={comment_id}")
  
@@ -268,31 +250,30 @@ def delete_comment(comment_id):
 # sets Content-Disposition with the original filename so a PDF/DOCX
 # downloads or opens correctly instead of arriving as an unnamed blob.
  
-def get_comment_attachment(comment_id):
+def get_comment_attachment(comment_id, db):
  
     logger.info(f"Fetching comment attachment | comment_id={comment_id}")
  
     try:
-        with SessionLocal() as db:
-            row = db.execute(
-                select(
-                    Comment.attachment_data,
-                    Comment.attachment_filename,
-                    Comment.attachment_content_type,
-                ).where(Comment.id == comment_id)
-            ).one_or_none()
+        row = db.execute(
+            select(
+                Comment.attachment_data,
+                Comment.attachment_filename,
+                Comment.attachment_content_type,
+            ).where(Comment.id == comment_id)
+        ).one_or_none()
  
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch comment attachment | comment_id={comment_id} | error={e}", exc_info=True)
-        raise ServiceUnavailableError("Failed to fetch comment attachment") from e
+        raise ServiceUnavailableError(COMMENT_ATTACHMENT_FETCH_FAILED) from e
  
     if row is None:
         logger.warning(f"Comment attachment fetch failed: comment not found | comment_id={comment_id}")
-        raise NotFoundError("Comment not found")
+        raise NotFoundError(COMMENT_NOT_FOUND)
  
     if row.attachment_data is None:
         logger.warning(f"Comment attachment fetch failed: no attachment | comment_id={comment_id}")
-        raise NotFoundError("No attachment found")
+        raise NotFoundError(COMMENT_ATTACHMENT_NOT_FOUND)
  
     return Response(
         content=row.attachment_data,
@@ -307,41 +288,39 @@ def get_comment_attachment(comment_id):
 # GET COMMENTS OF A CASE
 # ===================================================
  
-def get_case_comments(case_id: int):
+def get_case_comments(case_id: int, db):
  
     logger.info(
         f"Fetching comments for case | case_id={case_id}"
     )
  
     try:
-        with SessionLocal() as db:
- 
-            case_exists = db.scalar(
-                select(Case.id).where(
-                    Case.id == case_id
-                )
+        case_exists = db.scalar(
+            select(Case.id).where(
+                Case.id == case_id
             )
+        )
  
-            if case_exists is None:
-                logger.warning(
-                    f"Get case comments failed: case not found | case_id={case_id}"
-                )
-                raise NotFoundError("Case not found")
+        if case_exists is None:
+            logger.warning(
+                f"Get case comments failed: case not found | case_id={case_id}"
+            )
+            raise NotFoundError(CASE_NOT_FOUND)
  
-            comments = db.scalars(
-                select(Comment)
-                .where(
-                    Comment.case_id == case_id
-                )
-                .order_by(
-                    Comment.created_at.desc()
-                )
-            ).all()
+        comments = db.scalars(
+            select(Comment)
+            .where(
+                Comment.case_id == case_id
+            )
+            .order_by(
+                Comment.created_at.desc()
+            )
+        ).all()
  
-            return [
-                _comment_to_dict(comment)
-                for comment in comments
-            ]
+        return [
+            _comment_to_dict(comment)
+            for comment in comments
+        ]
  
     except NotFoundError:
         raise
@@ -353,5 +332,5 @@ def get_case_comments(case_id: int):
         )
  
         raise ServiceUnavailableError(
-            "Failed to fetch comments"
+            COMMENT_FETCH_FAILED
         ) from e
