@@ -30,6 +30,7 @@ router = APIRouter()
 )
 def upload_image(
     file: Annotated[UploadFile, File(...)],
+    case_id: Annotated[int, Form(...)],
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(require_roles(CAN_UPLOAD)),
     top_k: Annotated[
@@ -43,11 +44,13 @@ def upload_image(
 ):
     logger.info(
         f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | "
-        f"filename={file.filename} | top_k={top_k} | layer_name={layer_name}"
+        f"case_id={case_id} | filename={file.filename} | top_k={top_k} | "
+        f"layer_name={layer_name}"
     )
     return upload_image_service(
         file,
         db,
+        case_id=case_id,
         top_k=top_k,
         layer_name=layer_name,
         created_by=current_user["user_id"],
@@ -74,7 +77,7 @@ def get_images_by_layer(
 
 
 @router.get(
-    "/layers/{layer_id}/features",
+    "/geoclip/layers/{layer_id}/features",
     response_model=FeatureCollectionResponse,
 )
 def get_features_by_layer(
@@ -85,7 +88,7 @@ def get_features_by_layer(
     offset: int = 0,
 ):
     logger.info(
-        f"GET /layers/{layer_id}/features | user_id={current_user['user_id']} | "
+        f"GET /geoclip/layers/{layer_id}/features | user_id={current_user['user_id']} | "
         f"limit={limit} | offset={offset}"
     )
     return get_features_by_layer_service(layer_id, limit, offset, db)
@@ -102,7 +105,7 @@ def get_image(
 
 
 @router.delete(
-    "/layers/{layer_id}",
+    "/geoclip/layers/{layer_id}",
     response_model=LayerActionResponse,
 )
 def delete_layer(
@@ -110,5 +113,8 @@ def delete_layer(
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(require_roles(CAN_DELETE_OPERATIONAL)),
 ):
-    logger.warning(f"DELETE /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
+    logger.warning(
+        f"DELETE /geoclip/layers/{layer_id} | user_id={current_user['user_id']} | "
+        f"role={current_user['role']}"
+    )
     return delete_layer_service(layer_id, db)

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from typing import Optional
 
@@ -21,3 +23,15 @@ class LayerResponse(BaseModel):
     name: str
     layer_type: str
     visible: bool
+    created_at: datetime | None = None
+
+
+class LayerCreateResponse(BaseModel):
+    success: bool
+    layer_id: int
+    message: str
+
+
+class LayerActionResponse(BaseModel):
+    success: bool
+    message: str

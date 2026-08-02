@@ -125,57 +125,56 @@ def create_comment(case_id, feature_number, user_id, comment, attachment: Upload
 # from a real feature with zero comments. Now verifies the feature
 # exists first and raises NotFoundError (404) if not.
  
-def get_feature_comments(case_id, feature_number):
+def get_feature_comments(case_id, feature_number, db):
  
     logger.info(f"Fetching comments | case_id={case_id} | feature_number={feature_number}")
  
     try:
-        with SessionLocal() as db:
-            feature = db.scalar(
-                select(Feature).where(
-                    Feature.case_id == case_id,
-                    Feature.feature_number == feature_number,
-                )
+        feature = db.scalar(
+            select(Feature).where(
+                Feature.case_id == case_id,
+                Feature.feature_number == feature_number,
             )
-            if feature is None:
-                logger.warning(
-                    f"Get feature comments failed: feature not found | case_id={case_id} | "
-                    f"feature_number={feature_number}"
-                )
-                raise NotFoundError("Feature not found")
+        )
+        if feature is None:
+            logger.warning(
+                f"Get feature comments failed: feature not found | case_id={case_id} | "
+                f"feature_number={feature_number}"
+            )
+            raise NotFoundError("Feature not found")
  
-            result = db.execute(
-                select(
-                    Comment.id,
-                    Comment.user_id,
-                    User.full_name.label("user_full_name"),
-                    User.username.label("user_username"),
-                    User.role.label("user_role"),
-                    Comment.comment,
-                    Comment.attachment_filename,
-                    Comment.attachment_content_type,
-                    Comment.created_at,
-                )
-                .outerjoin(User, User.id == Comment.user_id)
-                .where(Comment.feature_id == feature.id)
-                .order_by(Comment.created_at.asc())
+        result = db.execute(
+            select(
+                Comment.id,
+                Comment.user_id,
+                User.full_name.label("user_full_name"),
+                User.username.label("user_username"),
+                User.role.label("user_role"),
+                Comment.comment,
+                Comment.attachment_filename,
+                Comment.attachment_content_type,
+                Comment.created_at,
             )
-            comments = []
-            for row in result:
-                comments.append({
-                    "id": row.id,
-                    "case_id": case_id,
-                    "feature_number": feature_number,
-                    "user_id": row.user_id,
-                    "user_full_name": row.user_full_name,
-                    "user_username": row.user_username,
-                    "user_role": row.user_role,
-                    "comment": row.comment,
-                    "has_attachment": row.attachment_filename is not None,
-                    "attachment_filename": row.attachment_filename,
-                    "attachment_content_type": row.attachment_content_type,
-                    "created_at": row.created_at
-                })
+            .outerjoin(User, User.id == Comment.user_id)
+            .where(Comment.feature_id == feature.id)
+            .order_by(Comment.created_at.asc())
+        )
+        comments = []
+        for row in result:
+            comments.append({
+                "id": row.id,
+                "case_id": case_id,
+                "feature_number": feature_number,
+                "user_id": row.user_id,
+                "user_full_name": row.user_full_name,
+                "user_username": row.user_username,
+                "user_role": row.user_role,
+                "comment": row.comment,
+                "has_attachment": row.attachment_filename is not None,
+                "attachment_filename": row.attachment_filename,
+                "attachment_content_type": row.attachment_content_type,
+                "created_at": row.created_at
+            })
  
     except NotFoundError:
         raise
@@ -268,19 +267,18 @@ def delete_comment(comment_id):
 # sets Content-Disposition with the original filename so a PDF/DOCX
 # downloads or opens correctly instead of arriving as an unnamed blob.
  
-def get_comment_attachment(comment_id):
+def get_comment_attachment(comment_id, db):
  
     logger.info(f"Fetching comment attachment | comment_id={comment_id}")
  
     try:
-        with SessionLocal() as db:
-            row = db.execute(
-                select(
-                    Comment.attachment_data,
-                    Comment.attachment_filename,
-                    Comment.attachment_content_type,
-                ).where(Comment.id == comment_id)
-            ).one_or_none()
+        row = db.execute(
+            select(
+                Comment.attachment_data,
+                Comment.attachment_filename,
+                Comment.attachment_content_type,
+            ).where(Comment.id == comment_id)
+        ).one_or_none()
  
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch comment attachment | comment_id={comment_id} | error={e}", exc_info=True)
@@ -307,41 +305,39 @@ def get_comment_attachment(comment_id):
 # GET COMMENTS OF A CASE
 # ===================================================
  
-def get_case_comments(case_id: int):
+def get_case_comments(case_id: int, db):
  
     logger.info(
         f"Fetching comments for case | case_id={case_id}"
     )
  
     try:
-        with SessionLocal() as db:
- 
-            case_exists = db.scalar(
-                select(Case.id).where(
-                    Case.id == case_id
-                )
+        case_exists = db.scalar(
+            select(Case.id).where(
+                Case.id == case_id
             )
+        )
  
-            if case_exists is None:
-                logger.warning(
-                    f"Get case comments failed: case not found | case_id={case_id}"
-                )
-                raise NotFoundError("Case not found")
+        if case_exists is None:
+            logger.warning(
+                f"Get case comments failed: case not found | case_id={case_id}"
+            )
+            raise NotFoundError("Case not found")
  
-            comments = db.scalars(
-                select(Comment)
-                .where(
-                    Comment.case_id == case_id
-                )
-                .order_by(
-                    Comment.created_at.desc()
-                )
-            ).all()
+        comments = db.scalars(
+            select(Comment)
+            .where(
+                Comment.case_id == case_id
+            )
+            .order_by(
+                Comment.created_at.desc()
+            )
+        ).all()
  
-            return [
-                _comment_to_dict(comment)
-                for comment in comments
-            ]
+        return [
+            _comment_to_dict(comment)
+            for comment in comments
+        ]
  
     except NotFoundError:
         raise

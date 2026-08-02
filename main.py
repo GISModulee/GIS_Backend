@@ -2,9 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-
-# GeoCLIP disabled temporarily
-# from services.geoclip_model import geo_model
+from services.geoclip_model import geo_model
 
 from utils.logger import logger
 from utils.config import settings
@@ -13,6 +11,7 @@ from utils.request_context import (
     set_request_id,
 )
 from utils.exception_handler import register_exception_handlers
+from schemas.system_schema import HealthResponse, HomeResponse
 
 from middleware.logging_middleware import LoggingMiddleware
 
@@ -22,8 +21,7 @@ from api.comments import router as comment_router
 from api.cases import router as case_router
 from api.uploads import router as upload_router
 
-# GeoCLIP disabled temporarily
-# from api.geoclip import router as geoclip_router
+from api.geoclip import router as geoclip_router
 
 from api.auth import router as auth_router
 from api.vector import router as vector_router
@@ -40,8 +38,7 @@ async def lifespan(app: FastAPI):
         f"TOP_K={settings.GEOCLIP_TOP_K}"
     )
 
-    # GeoCLIP disabled
-    # geo_model.load_model()
+    geo_model.load_model()
 
     logger.info("GIS Backend started successfully")
 
@@ -56,7 +53,6 @@ app = FastAPI(
     version="2.1.0",
     lifespan=lifespan,
 )
-
 
 register_exception_handlers(app)
 
@@ -73,7 +69,7 @@ async def request_id_middleware(request: Request, call_next):
     response = await call_next(request)
 
     response.headers["X-Request-ID"] = request_id
-
+    
     return response
 
 
@@ -99,8 +95,7 @@ app.add_middleware(LoggingMiddleware)
 
 app.include_router(auth_router)
 
-# GeoCLIP disabled
-# app.include_router(geoclip_router, tags=["Images"])
+app.include_router(geoclip_router, tags=["Images"])
 
 app.include_router(feature_router)
 app.include_router(layer_router)
@@ -111,7 +106,7 @@ app.include_router(vector_router)
 app.include_router(geo_search_router)
 
 
-@app.get("/health", tags=["System"])
+@app.get("/health", tags=["System"], response_model=HealthResponse)
 def health_check():
 
     logger.info("Health check accessed")
@@ -122,7 +117,7 @@ def health_check():
     }
 
 
-@app.get("/")
+@app.get("/", response_model=HomeResponse)
 def home():
 
     logger.info("Home endpoint accessed")

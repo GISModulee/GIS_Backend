@@ -21,3 +21,9 @@ class CentroidOperation(BaseModel):
 class ConvexHullOperation(BaseModel):
     case_id: int
     feature_numbers: List[int]
+
+
+class VectorOperationResponse(BaseModel):
+    success: bool
+    operation: str
+    geometry: str

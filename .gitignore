@@ -22,6 +22,7 @@ logs/
 
 # Uploads (if these are temporary)
 uploads/
+terrain_data/
 
 # OS files
 .DS_Store

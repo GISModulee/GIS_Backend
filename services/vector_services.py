@@ -3,7 +3,6 @@ from sqlalchemy import cast, func, select
 from sqlalchemy.exc import DataError, SQLAlchemyError
 from sqlalchemy.orm import aliased
  
-from database.database import SessionLocal
 from models.model import Feature
 from utils.logger import logger
 from utils.exceptions import (
@@ -14,10 +13,9 @@ from utils.exceptions import (
 )
  
  
-def _run_geometry(statement, error_message):
+def _run_geometry(statement, error_message, db):
     try:
-        with SessionLocal() as db:
-            geometry = db.scalar(statement)
+        geometry = db.scalar(statement)
  
     except DataError as e:
         raise UnprocessableEntityError("Invalid geometry data") from e
@@ -44,22 +42,20 @@ def _run_geometry(statement, error_message):
 # VERIFY FEATURE NUMBERS
 # ===================================================
  
-def _ensure_features_exist(case_id, feature_numbers):
+def _ensure_features_exist(case_id, feature_numbers, db):
  
     numbers = list(dict.fromkeys(feature_numbers))
  
     try:
-        with SessionLocal() as db:
- 
-            found = set(
-                db.scalars(
-                    select(Feature.feature_number)
-                    .where(
-                        Feature.case_id == case_id,
-                        Feature.feature_number.in_(numbers)
-                    )
-                ).all()
-            )
+        found = set(
+            db.scalars(
+                select(Feature.feature_number)
+                .where(
+                    Feature.case_id == case_id,
+                    Feature.feature_number.in_(numbers)
+                )
+            ).all()
+        )
  
     except SQLAlchemyError as e:
         logger.error(
@@ -90,14 +86,14 @@ def _ensure_features_exist(case_id, feature_numbers):
 # UNION
 # ===================================================
  
-def union_features(case_id, feature_numbers):
+def union_features(case_id, feature_numbers, db):
  
     if len(feature_numbers) < 2:
         raise BadRequestError(
             "At least two features are required for union"
         )
  
-    _ensure_features_exist(case_id, feature_numbers)
+    _ensure_features_exist(case_id, feature_numbers, db)
  
     geometry = _run_geometry(
         select(
@@ -111,6 +107,7 @@ def union_features(case_id, feature_numbers):
             Feature.feature_number.in_(feature_numbers)
         ),
         "Failed to compute union",
+        db,
     )
  
     return {
@@ -128,7 +125,8 @@ def _binary_operation(
     case_id,
     feature_numbers,
     operation,
-    label
+    label,
+    db
 ):
  
     if len(feature_numbers) != 2:
@@ -136,7 +134,7 @@ def _binary_operation(
             f"{label} requires exactly two features"
         )
  
-    _ensure_features_exist(case_id, feature_numbers)
+    _ensure_features_exist(case_id, feature_numbers, db)
  
     left = aliased(Feature)
     right = aliased(Feature)
@@ -156,6 +154,7 @@ def _binary_operation(
             right.feature_number == feature_numbers[1],
         ),
         f"Failed to compute {label}",
+        db,
     )
  
     return {
@@ -165,30 +164,33 @@ def _binary_operation(
     }
  
  
-def intersection_features(case_id, feature_numbers):
+def intersection_features(case_id, feature_numbers, db):
     return _binary_operation(
         case_id,
         feature_numbers,
         func.ST_Intersection,
-        "intersection"
+        "intersection",
+        db
     )
  
  
-def difference_features(case_id, feature_numbers):
+def difference_features(case_id, feature_numbers, db):
     return _binary_operation(
         case_id,
         feature_numbers,
         func.ST_Difference,
-        "difference"
+        "difference",
+        db
     )
  
  
-def symdifference_features(case_id, feature_numbers):
+def symdifference_features(case_id, feature_numbers, db):
     return _binary_operation(
         case_id,
         feature_numbers,
         func.ST_SymDifference,
-        "symdifference"
+        "symdifference",
+        db
     )
  
  
@@ -196,9 +198,9 @@ def symdifference_features(case_id, feature_numbers):
 # BUFFER
 # ===================================================
  
-def buffer_feature(case_id, feature_number, distance):
+def buffer_feature(case_id, feature_number, distance, db):
  
-    _ensure_features_exist(case_id, [feature_number])
+    _ensure_features_exist(case_id, [feature_number], db)
  
     buffered = cast(
         func.ST_Buffer(
@@ -223,6 +225,7 @@ def buffer_feature(case_id, feature_number, distance):
             Feature.feature_number == feature_number
         ),
         "Failed to compute buffer",
+        db,
     )
  
     return {
@@ -236,9 +239,9 @@ def buffer_feature(case_id, feature_number, distance):
 # CENTROID
 # ===================================================
  
-def centroid_feature(case_id, feature_number):
+def centroid_feature(case_id, feature_number, db):
  
-    _ensure_features_exist(case_id, [feature_number])
+    _ensure_features_exist(case_id, [feature_number], db)
  
     geometry = _run_geometry(
         select(
@@ -252,6 +255,7 @@ def centroid_feature(case_id, feature_number):
             Feature.feature_number == feature_number
         ),
         "Failed to compute centroid",
+        db,
     )
  
     return {
@@ -265,14 +269,14 @@ def centroid_feature(case_id, feature_number):
 # CONVEX HULL
 # ===================================================
  
-def convex_hull(case_id, feature_numbers):
+def convex_hull(case_id, feature_numbers, db):
  
     if len(feature_numbers) < 2:
         raise BadRequestError(
             "At least two features are required for convex hull"
         )
  
-    _ensure_features_exist(case_id, feature_numbers)
+    _ensure_features_exist(case_id, feature_numbers, db)
  
     geometry = _run_geometry(
         select(
@@ -288,6 +292,7 @@ def convex_hull(case_id, feature_numbers):
             Feature.feature_number.in_(feature_numbers)
         ),
         "Failed to compute convex hull",
+        db,
     )
  
     return {

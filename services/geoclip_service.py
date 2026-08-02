@@ -22,7 +22,6 @@ from models.model import Feature, ImageRecord, Layer
 from schemas.feature_schema import FeatureCreate
 from services.geoclip_processor import FileUtils, ImageProcessor
 from services.geoclip_validator import FileValidator
-from services.case_service import create_untitled_case
 from services.layer_service import create_layer, patch_layer
 from services.feature_service import create_feature
 
@@ -50,6 +49,7 @@ def _validate_top_k(top_k: int | None) -> int:
 def upload_image(
     file: UploadFile,
     db: Session,
+    case_id: int,
     top_k: int | None = None,
     layer_name: str | None = None,
     created_by: int | None = None,
@@ -60,8 +60,8 @@ def upload_image(
     effective_top_k = _validate_top_k(top_k)
 
     logger.info(
-        f"Processing GeoCLIP upload | filename={file.filename} | top_k={effective_top_k} | "
-        f"layer_name={layer_name} | created_by={created_by}"
+        f"Processing GeoCLIP upload | case_id={case_id} | filename={file.filename} | "
+        f"top_k={effective_top_k} | layer_name={layer_name} | created_by={created_by}"
     )
 
     FileValidator.validate_extension(file.filename)
@@ -108,23 +108,20 @@ def upload_image(
     predictions = result["predictions"]
     top_prediction = predictions[0]
 
-    # --- 7. Resolve a case (mirrors upload_service.extract_kml) ---
-    case_id = create_untitled_case(created_by)
-
     # --- 8. Create the layer via the shared layer_service ---
     layer_result = create_layer({
         "case_id": case_id,
         "name": layer_name if layer_name else "__pending__",
         "layer_type": "geoclip_prediction",
         "visible": True,
-    })
+    }, db)
     layer_id = layer_result["layer_id"]
 
     if layer_name:
         resolved_layer_name = layer_name
     else:
         resolved_layer_name = generate_layer_name(layer_id)
-        patch_layer(layer_id, {"name": resolved_layer_name})
+        patch_layer(layer_id, {"name": resolved_layer_name}, db)
 
     # --- 9. Create one Feature per prediction via the shared feature_service ---
     file_id = str(uuid.uuid4())
@@ -162,7 +159,7 @@ def upload_image(
             },
         )
 
-        feature_result = create_feature(feature_in, created_by)
+        feature_result = create_feature(feature_in, db, created_by)
         created_feature_ids.append(feature_result["feature_id"])
 
     

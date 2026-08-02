@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from database.database import get_db
 from schemas.vector_schema import (
     BufferOperation,
     CentroidOperation,
     ConvexHullOperation,
-    VectorOperation
+    VectorOperation,
+    VectorOperationResponse,
 )
 
 from services.vector_services import (
@@ -26,39 +29,41 @@ router = APIRouter(
 )
 
 
-@router.post("/union")
-def union(operation: VectorOperation):
-    return union_features(operation.feature_numbers)
+@router.post("/union", response_model=VectorOperationResponse)
+def union(operation: VectorOperation, db: Session = Depends(get_db)):
+    return union_features(operation.case_id, operation.feature_numbers, db)
 
 
-@router.post("/intersection")
-def intersection(operation: VectorOperation):
-    return intersection_features(operation.feature_numbers)
+@router.post("/intersection", response_model=VectorOperationResponse)
+def intersection(operation: VectorOperation, db: Session = Depends(get_db)):
+    return intersection_features(operation.case_id, operation.feature_numbers, db)
 
 
-@router.post("/difference")
-def difference(operation: VectorOperation):
-    return difference_features(operation.feature_numbers)
+@router.post("/difference", response_model=VectorOperationResponse)
+def difference(operation: VectorOperation, db: Session = Depends(get_db)):
+    return difference_features(operation.case_id, operation.feature_numbers, db)
 
 
-@router.post("/symdifference")
-def symdifference(operation: VectorOperation):
-    return symdifference_features(operation.feature_numbers)
+@router.post("/symdifference", response_model=VectorOperationResponse)
+def symdifference(operation: VectorOperation, db: Session = Depends(get_db)):
+    return symdifference_features(operation.case_id, operation.feature_numbers, db)
 
 
-@router.post("/buffer")
-def buffer(operation: BufferOperation):
+@router.post("/buffer", response_model=VectorOperationResponse)
+def buffer(operation: BufferOperation, db: Session = Depends(get_db)):
     return buffer_feature(
+        operation.case_id,
         operation.feature_number,
-        operation.distance
+        operation.distance,
+        db
     )
 
 
-@router.post("/centroid")
-def centroid(operation: CentroidOperation):
-    return centroid_feature(operation.feature_number)
+@router.post("/centroid", response_model=VectorOperationResponse)
+def centroid(operation: CentroidOperation, db: Session = Depends(get_db)):
+    return centroid_feature(operation.case_id, operation.feature_number, db)
 
 
-@router.post("/convex-hull")
-def convex(operation: ConvexHullOperation):
-    return convex_hull(operation.feature_numbers)
+@router.post("/convex-hull", response_model=VectorOperationResponse)
+def convex(operation: ConvexHullOperation, db: Session = Depends(get_db)):
+    return convex_hull(operation.case_id, operation.feature_numbers, db)

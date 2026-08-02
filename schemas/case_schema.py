@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 from typing import Optional
 
@@ -21,3 +23,24 @@ class CasePatch(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     priority: Optional[str] = None
+
+
+class CaseResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    status: str
+    priority: str
+    created_by: int | None = None
+    created_at: datetime
+
+
+class CaseCreateResponse(BaseModel):
+    success: bool
+    case_id: int
+    message: str
+
+
+class CaseActionResponse(BaseModel):
+    success: bool
+    message: str
