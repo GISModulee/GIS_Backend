@@ -22,6 +22,20 @@ from utils.logger import logger
 from utils.exceptions import NotFoundError, BadRequestError, ConflictError, ServiceUnavailableError
 
 
+# ===================================================
+# NAME PREFIXES FOR SYSTEM-GENERATED LAYERS
+# ===================================================
+# Maps a layer_type to the naming prefix used for that type's
+# auto-numbered layers, e.g. layer_type="auto" -> "Auto Layer 1",
+# layer_type="vector" -> "Vector Layer 1". Add an entry here whenever
+# a new kind of system-generated layer is introduced.
+
+_AUTO_NAME_PREFIXES = {
+    "auto": "Auto Layer",
+    "vector": "Vector Layer",
+}
+
+
 def _dict(layer):
     return {key: getattr(layer, key) for key in (
         "id", "case_id", "name", "layer_type", "visible", "created_at"
@@ -101,7 +115,22 @@ def create_import_layer(case_id: int, name: str, file_hash: str, db):
     return {"success": True, "layer_id": layer_id, "message": "Layer created successfully"}
 
 
-def create_untitled_layer(case_id: int, db):
+def create_untitled_layer(case_id: int, db, layer_type: str = "auto"):
+    """Create a system-numbered layer of the given layer_type.
+
+    layer_type defaults to "auto" (regular feature creation without an
+    explicit layer). Pass layer_type="vector" when auto-creating a
+    layer to hold vector operation results (union/intersection/buffer/
+    etc.), so it's visually and structurally distinct from ordinary
+    auto layers in the case's layer list.
+    """
+
+    prefix = _AUTO_NAME_PREFIXES.get(layer_type)
+    if prefix is None:
+        raise BadRequestError(
+            f"No auto-naming prefix configured for layer_type={layer_type!r}"
+        )
+
     try:
         # Lock case to avoid duplicate auto layer numbers
         db.execute(
@@ -115,7 +144,7 @@ def create_untitled_layer(case_id: int, db):
                         cast(
                             func.replace(
                                 Layer.name,
-                                "Auto Layer ",
+                                f"{prefix} ",
                                 ""
                             ),
                             Integer
@@ -126,8 +155,8 @@ def create_untitled_layer(case_id: int, db):
             )
             .where(
                 Layer.case_id == case_id,
-                Layer.layer_type == "auto",
-                Layer.name.like("Auto Layer %")
+                Layer.layer_type == layer_type,
+                Layer.name.like(f"{prefix} %")
             )
         )
 
@@ -135,8 +164,8 @@ def create_untitled_layer(case_id: int, db):
 
         record = Layer(
             case_id=case_id,
-            name=f"Auto Layer {next_number}",
-            layer_type="auto",
+            name=f"{prefix} {next_number}",
+            layer_type=layer_type,
             visible=True
         )
 
@@ -149,7 +178,7 @@ def create_untitled_layer(case_id: int, db):
     except SQLAlchemyError as e:
 
         logger.error(
-            f"Failed to auto-create layer | case_id={case_id} | error={e}",
+            f"Failed to auto-create layer | case_id={case_id} | layer_type={layer_type} | error={e}",
             exc_info=True
         )
 
@@ -201,22 +230,23 @@ def delete_layer(layer_id, db):
             raise NotFoundError(LAYER_NOT_FOUND)
         case_id, name, layer_type = item.case_id, item.name, item.layer_type
         deleted_number = None
-        if layer_type == "auto":
+        prefix = _AUTO_NAME_PREFIXES.get(layer_type)
+        if prefix is not None:
             try:
-                deleted_number = int(name.replace("Auto Layer ", ""))
+                deleted_number = int(name.replace(f"{prefix} ", ""))
             except (ValueError, AttributeError):
                 pass
         db.delete(item)
         db.flush()
         if deleted_number is not None:
             remaining = db.scalars(select(Layer).where(
-                Layer.case_id == case_id, Layer.layer_type == "auto"
+                Layer.case_id == case_id, Layer.layer_type == layer_type
             ).order_by(Layer.name)).all()
             for candidate in remaining:
                 try:
-                    number = int(candidate.name.replace("Auto Layer ", ""))
+                    number = int(candidate.name.replace(f"{prefix} ", ""))
                     if number > deleted_number:
-                        candidate.name = f"Auto Layer {number - 1}"
+                        candidate.name = f"{prefix} {number - 1}"
                 except (ValueError, AttributeError):
                     continue
         db.commit()
