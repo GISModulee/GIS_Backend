@@ -2,9 +2,9 @@
 
 // ── Two separate backends ─────────────────────────────────
 export const API_URLS = {
-  GEO: "http://192.168.6.12:8082/api",                          // boundaries, tiles
+  GEO: "http://192.168.6.63:8082/api",                          // boundaries, tiles
   // LAYERS: "https://crabbing-nickname-easeful.ngrok-free.dev",    // cases, layers, features
-  LAYERS: "http://192.168.8.29:8000",    // cases, layers, features
+  LAYERS: "http://192.168.8.39:8000",    // cases, layers, features
   // LAYERS: "http://192.168.8.168:8000",
 };
 
