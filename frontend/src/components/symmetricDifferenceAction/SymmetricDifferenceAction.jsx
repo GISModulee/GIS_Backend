@@ -4,11 +4,9 @@ import { useLayers } from "@/hooks/useLayers.js";
 import layerService from "@/utils/layerService.js";
 import toast from "react-hot-toast";
 import FeatureSelector from "../featureSelector/FeatureSelector.jsx";
-import { doFeaturesIntersect } from "@/utils/vectorOps.js";
 
 export default function SymmetricDifferenceAction({ onCancel }) {
-  const [featureA, setFeatureA] = useState("");
-  const [featureB, setFeatureB] = useState("");
+  const [selectedFeatures, setSelectedFeatures] = useState([]);
   const [resultName, setResultName] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -19,43 +17,34 @@ export default function SymmetricDifferenceAction({ onCancel }) {
   const activeCaseId = match ? parseInt(match[1], 10) : activeCaseIdFromStore;
 
   const handleRun = async () => {
-    if (!featureA || !featureB) {
-      toast.error("Please select both Feature A and Feature B.");
+    if (!Array.isArray(selectedFeatures) || selectedFeatures.length < 2) {
+      toast.error("Please select at least 2 features to perform Symmetric Difference.");
       return;
     }
 
-    if (featureA === featureB) {
-      toast.error("Select two different features.");
-      return;
-    }
-
-    let featAObj = null;
-    let featBObj = null;
-
+    const selectedObjs = [];
     items.forEach((lyr) => {
-      const foundA = lyr.features?.find((f) => f.localId === featureA);
-      if (foundA) featAObj = foundA;
-      const foundB = lyr.features?.find((f) => f.localId === featureB);
-      if (foundB) featBObj = foundB;
+      (lyr.features || []).forEach((f) => {
+        if (selectedFeatures.includes(f.localId)) {
+          selectedObjs.push(f);
+        }
+      });
     });
 
-    if (!featAObj || !featBObj) {
+    if (selectedObjs.length < 2) {
       toast.error("Could not find selected features.");
       return;
     }
 
-    // Check if features intersect (removed client-side check as requested, handled by backend)
-
     setLoading(true);
     const toastId = toast.loading("Computing and saving symmetric difference layer...");
     try {
-      const nameA = featAObj.name || "A";
-      const nameB = featBObj.name || "B";
-      const name = resultName.trim() || `Sym Diff (${nameA} ^ ${nameB})`;
+      const defaultName = `Sym Diff (${selectedObjs.map(f => f.name || "Feature").join(" ^ ")})`;
+      const name = resultName.trim() || defaultName;
 
       const response = await layerService.runSymmetricDifference({
         case_id: activeCaseId,
-        feature_numbers: [featAObj.feature_number, featBObj.feature_number],
+        feature_numbers: selectedObjs.map(f => f.feature_number),
       });
 
       const feat = response?.features ? response.features[0] : response;
@@ -80,7 +69,7 @@ export default function SymmetricDifferenceAction({ onCancel }) {
         layer_type: "auto",
         visible: true,
         opacity: 1,
-        color: "#8b5cf6",
+        color: "#ec4899",
       });
 
       const layerId = newLayer?.id ?? newLayer?.layer_id;
@@ -97,13 +86,13 @@ export default function SymmetricDifferenceAction({ onCancel }) {
         created_by: 1,
         geometry: geom,
         geometry_type: geom.type || "Polygon",
-        properties: { name, color: "#8b5cf6" },
+        properties: { name, color: "#ec4899" },
       });
 
       // Reload layers from backend to render the new layer and feature
       await loadLayersFromBackend();
 
-      toast.success(saveRes?.message || response?.message || newLayer?.message || "✓ Symmetric Difference layer created and added to map!", { id: toastId });
+      toast.success(saveRes?.message || response?.message || newLayer?.message || "✓ Symmetric difference layer created and added to map!", { id: toastId });
       if (onCancel) onCancel();
     } catch (e) {
       console.error(e);
@@ -117,7 +106,7 @@ export default function SymmetricDifferenceAction({ onCancel }) {
     <div className="space-y-2 pt-1 border-t border-gray-100 dark:border-gray-800">
       <div className="flex justify-between items-center px-0.5">
         <span className="text-[11px] font-bold text-gray-700 dark:text-gray-300">
-          Symmetric Difference Settings
+          Symmetric Diff Settings
         </span>
         <button
           onClick={onCancel}
@@ -128,20 +117,15 @@ export default function SymmetricDifferenceAction({ onCancel }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5">
+      <div>
         <FeatureSelector
-          label="Feature A"
-          value={featureA}
-          onChange={setFeatureA}
+          label="Select Features"
+          value={selectedFeatures}
+          onChange={setSelectedFeatures}
           items={items}
           disabled={loading}
-        />
-        <FeatureSelector
-          label="Feature B"
-          value={featureB}
-          onChange={setFeatureB}
-          items={items}
-          disabled={loading}
+          multiple={true}
+          placeholder="— select multiple features —"
         />
       </div>
 
@@ -164,7 +148,7 @@ export default function SymmetricDifferenceAction({ onCancel }) {
         disabled={loading}
         className="w-full py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium rounded shadow transition-colors disabled:opacity-50"
       >
-        {loading ? "Saving..." : "Run Sym Difference"}
+        {loading ? "Saving..." : "Run Symmetric Difference"}
       </button>
     </div>
   );

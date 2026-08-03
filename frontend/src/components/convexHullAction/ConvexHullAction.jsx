@@ -6,8 +6,7 @@ import toast from "react-hot-toast";
 import FeatureSelector from "../featureSelector/FeatureSelector.jsx";
 
 export default function ConvexHullAction({ onCancel }) {
-  const [featureA, setFeatureA] = useState("");
-  const [featureB, setFeatureB] = useState("");
+  const [selectedFeatures, setSelectedFeatures] = useState([]);
   const [resultName, setResultName] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -18,27 +17,21 @@ export default function ConvexHullAction({ onCancel }) {
   const activeCaseId = match ? parseInt(match[1], 10) : activeCaseIdFromStore;
 
   const handleRun = async () => {
-    if (!featureA || !featureB) {
-      toast.error("Please select both Feature A and Feature B.");
+    if (!Array.isArray(selectedFeatures) || selectedFeatures.length < 2) {
+      toast.error("Please select at least 2 features to perform Convex Hull.");
       return;
     }
 
-    if (featureA === featureB) {
-      toast.error("Select two different features.");
-      return;
-    }
-
-    let featAObj = null;
-    let featBObj = null;
-
+    const selectedObjs = [];
     items.forEach((lyr) => {
-      const foundA = lyr.features?.find((f) => f.localId === featureA);
-      if (foundA) featAObj = foundA;
-      const foundB = lyr.features?.find((f) => f.localId === featureB);
-      if (foundB) featBObj = foundB;
+      (lyr.features || []).forEach((f) => {
+        if (selectedFeatures.includes(f.localId)) {
+          selectedObjs.push(f);
+        }
+      });
     });
 
-    if (!featAObj || !featBObj) {
+    if (selectedObjs.length < 2) {
       toast.error("Could not find the selected features.");
       return;
     }
@@ -46,13 +39,12 @@ export default function ConvexHullAction({ onCancel }) {
     setLoading(true);
     const toastId = toast.loading("Computing and saving convex hull layer...");
     try {
-      const nameA = featAObj.name || "A";
-      const nameB = featBObj.name || "B";
-      const name = resultName.trim() || `Convex Hull (${nameA} & ${nameB})`;
+      const defaultName = `Convex Hull (${selectedObjs.map(f => f.name || "Feature").join(" & ")})`;
+      const name = resultName.trim() || defaultName;
 
       const response = await layerService.runConvexHull({
         case_id: activeCaseId,
-        feature_numbers: [featAObj.feature_number, featBObj.feature_number],
+        feature_numbers: selectedObjs.map(f => f.feature_number),
       });
 
       console.log("[ConvexHullAction] response:", response);
@@ -129,20 +121,15 @@ export default function ConvexHullAction({ onCancel }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5">
+      <div>
         <FeatureSelector
-          label="Feature A"
-          value={featureA}
-          onChange={setFeatureA}
+          label="Select Features"
+          value={selectedFeatures}
+          onChange={setSelectedFeatures}
           items={items}
           disabled={loading}
-        />
-        <FeatureSelector
-          label="Feature B"
-          value={featureB}
-          onChange={setFeatureB}
-          items={items}
-          disabled={loading}
+          multiple={true}
+          placeholder="— select multiple features —"
         />
       </div>
 
