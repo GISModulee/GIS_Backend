@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useSelector } from "react-redux";
 import { createPortal } from "react-dom";
 import { useLayers } from "@/hooks/useLayers.js";
-import { layersClient } from "@/api/client.js";
+import axiosInstance from "@/api/axiosInstance.js";
 import toast from "react-hot-toast";
 import { getErrorMessage } from "@/utils/ErrorUtils.js";
 
@@ -87,9 +87,8 @@ export default function FetchNewsModal({ onClose }) {
     const feat = allFeatures.find(
       (f) => f.localId === selectedFeatureId || f.backendId === selectedFeatureId
     );
-    const backendId = feat ? feat.backendId || feat.id : null;
-    if (!backendId) {
-      toast.error("Please select a geographic feature first");
+    if (!feat || !feat.feature_number || !feat.case_id || !feat.layer_id) {
+      toast.error("Please select a saved geographic feature first");
       setLoading(false);
       return;
     }
@@ -115,7 +114,9 @@ export default function FetchNewsModal({ onClose }) {
     }
 
     const payload = {
-      feature_id: Number(backendId),
+      case_id: Number(feat.case_id),
+      layer_id: Number(feat.layer_id),
+      feature_number: Number(feat.feature_number),
       keywords: keywordList,
       start_date: new Date(startDate).toISOString(),
       end_date: new Date(endDate).toISOString(),
@@ -124,9 +125,7 @@ export default function FetchNewsModal({ onClose }) {
 
     try {
       console.log("[FetchNews] Searching news with payload:", payload);
-      const response = await layersClient.post("/api/geo-search/news", payload, {
-        timeout: 0,
-      });
+      const response = await axiosInstance.post("/geo-search/news", payload);
       console.log("[FetchNews] Response:", response.data);
 
       let articlesArray = [];

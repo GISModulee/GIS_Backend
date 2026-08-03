@@ -17,24 +17,26 @@ export function useLayerBootstrap() {
       const layers = await layerService.getAllForCase(activeCaseId);
       console.log("[loadLayersFromBackend] layers:", layers);
 
+      let allFeaturesForCase = [];
+      try {
+        const res = await layerService.getFeaturesByCase(activeCaseId);
+        if (Array.isArray(res)) {
+          allFeaturesForCase = res;
+        } else if (res && Array.isArray(res.features)) {
+          allFeaturesForCase = res.features;
+        } else if (res && Array.isArray(res.data)) {
+          allFeaturesForCase = res.data;
+        }
+      } catch (err) {
+        console.error("Failed to load features for case:", err);
+      }
+
       const hydrated = await Promise.all(
         layers.map(async (layer) => {
           const layerLocalId = `local_${layer.id}`;
 
-          // Fetch features belonging to this layer
-          let featuresList = [];
-          try {
-            const res = await layerService.getFeaturesByLayer(layer.id);
-            if (Array.isArray(res)) {
-              featuresList = res;
-            } else if (res && Array.isArray(res.features)) {
-              featuresList = res.features;
-            } else if (res && Array.isArray(res.data)) {
-              featuresList = res.data;
-            }
-          } catch (err) {
-            console.error(`Failed to load features for layer ${layer.id}:`, err);
-          }
+          // Filter features belonging to this layer
+          const featuresList = allFeaturesForCase.filter((f) => Number(f.layer_id) === Number(layer.id));
 
           const isImagePredictionLayer = layer.name && /\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(layer.name);
 
@@ -78,12 +80,15 @@ export function useLayerBootstrap() {
 
               let commentsList = [];
               try {
-                commentsList = await layerService.getComments(f.id);
+                commentsList = await layerService.getComments(activeCaseId, f.feature_number);
               } catch (_) {}
 
               return {
                 localId: `local_feat_${f.id}`,
                 backendId: f.id,
+                feature_number: f.feature_number,
+                case_id: f.case_id || activeCaseId,
+                layer_id: f.layer_id || layer.id,
                 layerLocalId,
                 status: "saved",
                 name: f.name || "Untitled Feature",
@@ -102,6 +107,7 @@ export function useLayerBootstrap() {
           return {
             localId: layerLocalId,
             backendId: layer.id,
+            case_id: layer.case_id || activeCaseId,
             status: "saved",
             name: layer.name || "null",
             type: layer.layer_type || "auto",

@@ -4,7 +4,7 @@ import { useSelector } from "react-redux";
 import { Image as ImageIcon, X } from "lucide-react";
 import layerService from "@/utils/layerService.js";
 import { useLayers } from "@/hooks/useLayers.js";
-import { API_URLS } from "@/config/apiConfig.js";
+import axiosInstance from "@/api/axiosInstance.js";
 import toast from "react-hot-toast";
 import AddImageForm from "../addImageForm/AddImageForm.jsx";
 import AddImageUpload from "../addImageUpload/AddImageUpload.jsx";
@@ -95,33 +95,11 @@ export default function AddImageModal({ isOpen, onClose }) {
     try {
       console.log("Uploading image layer...", selectedFile);
 
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `${API_URLS.LAYERS}/upload?case_id=${activeCaseId}&top_k=${numPredictions}&layer_name=${encodeURIComponent(resolvedLayerName)}`,
-        {
-          method: "POST",
-          headers: {
-            "ngrok-skip-browser-warning": "true",
-            ...(token && { "Authorization": `Bearer ${token}` }),
-          },
-          body: formData,
-        },
-      );
+      const response = await axiosInstance.post("/upload", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
 
-      if (!response.ok) {
-        let errorMsg = "Upload failed";
-        try {
-          const errData = await response.json();
-          errorMsg = errData.detail || errData.message || JSON.stringify(errData);
-        } catch (_) {
-          try {
-            errorMsg = await response.text();
-          } catch (_) { }
-        }
-        throw new Error(errorMsg);
-      }
-
-      const result = await response.json();
+      const result = response.data;
 
       console.log("=== Upload Response ===", result);
 

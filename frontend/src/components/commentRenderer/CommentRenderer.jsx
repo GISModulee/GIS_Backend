@@ -54,6 +54,17 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
       return undefined;
     }
 
+    const allFeatures = items.flatMap((layer) => layer.features || []);
+    const featureObj = allFeatures.find(
+      (f) => f.backendId === featureId || f.localId === featureId
+    );
+    const caseId = featureObj?.case_id;
+    const featureNumber = featureObj?.feature_number;
+
+    if (!caseId || !featureNumber) {
+      return undefined;
+    }
+
     const connect = () => {
       if (isUnmounted) {
         return;
@@ -88,7 +99,7 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
 
       // Replace the API path instead of appending to /layers.
       websocketUrl.pathname =
-        `/ws/features/${featureId}/comments`;
+        `/ws/cases/${caseId}/features/${featureNumber}/comments`;
 
       websocketUrl.search =
         `?token=${encodeURIComponent(token)}`;
@@ -132,7 +143,7 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
 
           if (
             message.event !== "comment.created" ||
-            Number(message.feature_id) !== featureId
+            Number(message.feature_number) !== Number(featureNumber)
           ) {
             return;
           }
@@ -144,7 +155,7 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
 
           // Automatically get the updated server state.
           const rawComments =
-            await layerService.getComments(featureId);
+            await layerService.getComments(caseId, featureNumber);
 
           if (isUnmounted) {
             return;
@@ -358,13 +369,21 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
       const toastId = toast.loading("Saving comment...");
 
       try {
-        const userId = user?.id || 1;
-        const res = await layerService.addComment(Number(featureBackendId), commentText, userId, file);
+        const allFeatures = items.flatMap((layer) => layer.features || []);
+        const featureObj = allFeatures.find((f) => f.backendId === Number(featureBackendId));
+        const caseId = featureObj?.case_id;
+        const featureNumber = featureObj?.feature_number;
+
+        if (!caseId || !featureNumber) {
+          throw new Error("Could not find case_id or feature_number for this feature.");
+        }
+
+        const res = await layerService.addComment(caseId, featureNumber, commentText, file);
 
         if (inputEl) inputEl.value = "";
         window.clearPopupFile(featureBackendId);
 
-        const rawComments = await layerService.getComments(Number(featureBackendId));
+        const rawComments = await layerService.getComments(caseId, featureNumber);
         const updatedCommentsList = await Promise.all(
           rawComments.map(async (c) => {
             let imgSrc = null;
@@ -461,8 +480,11 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
                 if (!featId) return;
                 commentMarker.setPopupContent(buildCommentPopupHTML([], featId, user, true));
                 dispatch(selectFeature(featId));
-                try {
-                  const rawComments = await layerService.getComments(featId);
+                 try {
+                   const caseId = feature.case_id;
+                   const featureNumber = feature.feature_number;
+                   if (!caseId || !featureNumber) return;
+                   const rawComments = await layerService.getComments(caseId, featureNumber);
                   const updatedCommentsList = await Promise.all(
                     rawComments.map(async (c) => {
                       let imgSrc = null;

@@ -26,12 +26,14 @@ export function buildTooltipHTML(feature, layer, area) {
 
 // ── Load + inject comments into tooltip ───────────────────
 export async function loadComments(feature) {
-  if (!feature.backendId) return;
+  const caseId = feature.case_id;
+  const featureNumber = feature.feature_number;
+  if (!caseId || !featureNumber) return;
   const el = document.getElementById(`tooltip-comments-${feature.localId}`);
   if (!el) return;
 
   try {
-    const comments = await layerService.getComments(feature.backendId);
+    const comments = await layerService.getComments(caseId, featureNumber);
 
     if (!comments || comments.length === 0) {
       el.innerHTML = `<span style="color:#aaa;font-size:12px;">No comments</span>`;

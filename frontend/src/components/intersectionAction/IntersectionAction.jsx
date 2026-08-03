@@ -54,9 +54,8 @@ export default function IntersectionAction({ onCancel }) {
       const name = resultName.trim() || `Intersection (${nameA} & ${nameB})`;
 
       const response = await layerService.runIntersection({
-        feature_ids: [featAObj.backendId, featBObj.backendId],
         case_id: activeCaseId,
-        name: name,
+        feature_numbers: [featAObj.feature_number, featBObj.feature_number],
       });
 
       const feat = response?.features ? response.features[0] : response;
