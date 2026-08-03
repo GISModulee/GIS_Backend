@@ -41,10 +41,9 @@ export default function BufferAction({ onCancel }) {
       const name = resultName.trim() || `Buffer (${nameA} - ${bufferDistance}m)`;
 
       const response = await layerService.runBuffer({
-        feature_id: featAObj.backendId,
-        distance: bufferDistance,
         case_id: activeCaseId,
-        name: name,
+        feature_number: featAObj.feature_number,
+        distance: bufferDistance,
       });
 
       const feat = response?.features ? response.features[0] : response;

@@ -54,9 +54,8 @@ export default function DifferenceAction({ onCancel }) {
       const name = resultName.trim() || `Difference (${nameA} - ${nameB})`;
 
       const response = await layerService.runDifference({
-        feature_ids: [featAObj.backendId, featBObj.backendId],
         case_id: activeCaseId,
-        name: name,
+        feature_numbers: [featAObj.feature_number, featBObj.feature_number],
       });
 
       const feat = response?.features ? response.features[0] : response;

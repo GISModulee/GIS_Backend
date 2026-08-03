@@ -14,6 +14,7 @@ export default function CommentModal() {
   const { changeActiveTool } = useMap();
   const { loadLayersFromBackend } = useLayers();
   const { open, featureBackendId } = useSelector((s) => s.layers.commentModal);
+  const { items } = useSelector((s) => s.layers);
 
   const [comment, setComment] = useState("");
   const [imageFile, setImageFile] = useState(null);
@@ -38,7 +39,16 @@ export default function CommentModal() {
     if (!comment.trim()) return;
     setLoading(true);
     try {
-      await layerService.addComment(featureBackendId, comment.trim(), 1, imageFile);
+      const allFeatures = items.flatMap((layer) => layer.features || []);
+      const feature = allFeatures.find((f) => f.backendId === featureBackendId);
+      const caseId = feature?.case_id;
+      const featureNumber = feature?.feature_number;
+
+      if (!caseId || !featureNumber) {
+        throw new Error("Could not find case_id or feature_number for this feature.");
+      }
+
+      await layerService.addComment(caseId, featureNumber, comment.trim(), imageFile);
       setComment("");
       setImageFile(null);
       setPreview(null);

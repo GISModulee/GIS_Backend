@@ -4,7 +4,7 @@ import { useSelector } from "react-redux";
 import { Upload, X, File } from "lucide-react";
 import { useLayers } from "@/hooks/useLayers.js";
 import layerService from "@/utils/layerService.js";
-import { API_URLS } from "@/config/apiConfig.js";
+import axiosInstance from "@/api/axiosInstance.js";
 import toast from "react-hot-toast";
 
 export default function UploadData() {
@@ -99,33 +99,11 @@ export default function UploadData() {
     try {
       console.log("Uploading data file...", selectedFile);
 
-      const token = localStorage.getItem("token");
-      const response = await fetch(
-        `${API_URLS.LAYERS}/import?case_id=${activeCaseId}&layer_name=${encodeURIComponent(resolvedName)}`,
-        {
-          method: "POST",
-          headers: {
-            "ngrok-skip-browser-warning": "true",
-            ...(token && { "Authorization": `Bearer ${token}` }),
-          },
-          body: formData,
-        },
-      );
+      const response = await axiosInstance.post("/import", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
 
-      if (!response.ok) {
-        let errorMsg = "Data upload failed";
-        try {
-          const errData = await response.json();
-          errorMsg = errData.detail || errData.message || JSON.stringify(errData);
-        } catch (_) {
-          try {
-            errorMsg = await response.text();
-          } catch (_) { }
-        }
-        throw new Error(errorMsg);
-      }
-
-      const result = await response.json();
+      const result = response.data;
       console.log("=== Data Upload Response ===", result);
 
       if (result.layer_id) {

@@ -22,43 +22,6 @@ export const API_CONFIG = {
   TIMEOUT: 15000,
 };
 
-// ── All endpoints ─────────────────────────────────────────
-export const API_ENDPOINTS = {
-  BOUNDARIES: {
-    INDIA: "/boundaries/india",
-  },
-  TILES: {
-    BASE: "/tiles/{z}/{x}/{y}.png",
-  },
-  CASES: {
-    ALL: "/cases",
-    BY_ID: (id) => `/cases/${id}`,
-    LAYERS: (caseId) => `/layers/case/${caseId}`,
-    LAYER_BY_ID: (caseId, layerId) => `/layers/${layerId}`,
-  },
-  LAYERS: {
-    ALL: "/layers",
-    BY_ID: (id) => `/layers/${id}`,
-  },
-  FEATURES: {
-    ALL: "/features",
-    BY_ID: (id) => `/features/${id}`,
-    BY_LAYER: (layerId) => `/layers/${layerId}/features`,
-  },
-  COMMENTS: {
-    CREATE: "/comments",
-    BY_FEATURE: (featureId) => `/features/${featureId}/comments`,
-  },
-  VECTOR: {
-    UNION: "/vector/union",
-    INTERSECTION: "/vector/intersection",
-    DIFFERENCE: "/vector/difference",
-    BUFFER: "/vector/buffer",
-    SYM_DIFFERENCE: "/vector/symdifference",
-    CENTROID: "/vector/centroid",
-    CONVEX_HULL: "/vector/convex-hull",
-  },
-};
 
 // ── App Config ────────────────────────────────────────────
 // Flip to true when backend is ready — no other changes needed anywhere
