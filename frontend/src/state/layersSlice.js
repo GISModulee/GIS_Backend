@@ -93,6 +93,21 @@ const layersSlice = createSlice({
       }
     },
 
+    setFeatureHasComments(state, action) {
+      const { backendId, featureLocalId, hasComments, commentsList, commentsCount } = action.payload;
+      for (const layer of state.items) {
+        const feature = (layer.features || []).find(
+          (f) => (backendId && Number(f.backendId) === Number(backendId)) || (featureLocalId && f.localId === featureLocalId)
+        );
+        if (feature) {
+          feature.hasComments = typeof hasComments === 'boolean' ? hasComments : false;
+          feature.comments_count = commentsCount ?? (commentsList ? commentsList.length : 0);
+          if (commentsList) feature.commentsList = commentsList;
+          break;
+        }
+      }
+    },
+
     setBackendGeoJson(state, action) {
       state.backendGeoJson = action.payload;
     },
@@ -296,7 +311,7 @@ const layersSlice = createSlice({
 
 export const {
   hydrateFromBackend,
-  setLayerBackendId, setFeatureBackendId,
+  setLayerBackendId, setFeatureBackendId, setFeatureHasComments,
   addLayer, updateLayer, deleteLayer,
   toggleLayerVisible, toggleLayerExpanded, selectLayer, selectFeature, setHoveredFeatureId,
   addFeature, updateFeature, deleteFeature,

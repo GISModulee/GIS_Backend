@@ -117,7 +117,7 @@ export default function AddImageModal({ isOpen, onClose }) {
           await layerService.replaceLayer(result.layer_id, {
             case_id: activeCaseId,
             name: resolvedLayerName,
-            layer_type: "group",
+            layer_type: "geoclip",
             visible: true,
             color: "#ff0000",
           });

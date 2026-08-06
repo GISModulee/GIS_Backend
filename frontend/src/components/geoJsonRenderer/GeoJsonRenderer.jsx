@@ -3,9 +3,9 @@ import { useMap as useLeafletMap } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import L from "leaflet";
 import { useLayers } from "@/hooks/useLayers.js";
-import { selectFeature, openCommentModal } from "@/state/layersSlice.js";
+import { selectFeature, openCommentModal, setHoveredFeatureId } from "@/state/layersSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
-import { buildTooltipHTML, loadComments } from "@/utils/TooltipUtils.js";
+import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
 
 const customPinIcon = (color, isSelected) => {
   const pinSVG = `
@@ -45,8 +45,7 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
       layer.features.forEach((feature) => {
         if (!feature.geometry) return;
 
-        const isCircleType = feature.geometry_type === "Circle" || feature.type === "circle";
-        if (isCircleType) return;
+
 
         const isFeatureSelected = selectedFeatureId && feature.backendId === selectedFeatureId;
         const isLayerSelected = selectedLayerId && layer.localId === selectedLayerId;
@@ -56,7 +55,7 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
         const shouldShow = layer.visible && feature.visible;
 
         const style = {
-          color: isHovered ? "#111827" : (isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb")),
+          color: isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb"),
           weight: isHovered ? 6 : (isSelected ? 5 : 2),
           opacity: 1,
           fillOpacity: isHovered ? 0.6 : (isSelected ? 0.35 : 0.15),
@@ -146,14 +145,13 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
                   .setLatLng(e.latlng)
                   .setContent(buildTooltipHTML(currentFeature, currentLayer || layer, area))
                   .openOn(leafletMap);
-                setTimeout(() => loadComments(currentFeature), 50);
               } catch (_) { }
             });
           },
 
           pointToLayer: (_f, latlng) => {
             const radius = feature.geometry?.radius;
-            if (radius != null) return L.circle(latlng, { radius, renderer: canvasRenderer, ...style });
+            if (radius != null && feature.geometry_type !== "Circle") return L.circle(latlng, { radius, ...style, interactive: true });
             const color = isHovered ? "#111827" : (isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb"));
             return L.marker(latlng, {
               icon: customPinIcon(color, isSelected || isHovered)

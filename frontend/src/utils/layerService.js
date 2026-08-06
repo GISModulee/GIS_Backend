@@ -7,13 +7,14 @@ const layerService = {
   },
 
 
-  updateLayer: async (layerId, payload) => {
-    const { data } = await axiosInstance.patch(`/layers/${layerId}`, payload);
+  updateLayer: async (caseId, layerId, payload) => {
+    const { data } = await axiosInstance.patch(`/layers/case/${caseId}/${layerId}`, payload);
     return data;
   },
 
-  deleteLayer: async (layerId) => {
-    await axiosInstance.delete(`/layers/${layerId}`);
+  deleteLayer: async (caseId, layerId) => {
+    const { data } = await axiosInstance.delete(`/layers/case/${caseId}/${layerId}`);
+    return data;
   },
 
   createFeature: async (payload) => {
@@ -31,12 +32,36 @@ const layerService = {
     return data;
   },
 
-  deleteFeature: async (featureId) => {
-    await axiosInstance.delete(`/features/${featureId}`);
+  editFeatureInLayer: async (caseId, layerId, featureId, payload) => {
+    const { data } = await axiosInstance.put(`/cases/${caseId}/layers/${layerId}/features/${featureId}`, payload);
+    return data;
   },
 
-  getFeaturesByLayer: async (layerId) => {
-    const { data } = await axiosInstance.get(`/layers/${layerId}/features`);
+  editFeaturePartialInLayer: async (caseId, layerId, featureId, payload) => {
+    const { data } = await axiosInstance.patch(`/cases/${caseId}/layers/${layerId}/features/${featureId}`, payload);
+    return data;
+  },
+
+  deleteFeature: async (caseId, layerId, featureId) => {
+    const { data } = await axiosInstance.delete(`/cases/${caseId}/layers/${layerId}/features/${featureId}`);
+    return data;
+  },
+  getGeoclipFeatures: async (layerId) => {
+    const { data } = await axiosInstance.get(`/geoclip/layers/${layerId}/features`);
+    return data;
+  },
+  deleteGeoclipLayer: async (layerId) => {
+    const { data } = await axiosInstance.delete(`/geoclip/layers/${layerId}`);
+    return data;
+  },
+
+  getFeaturesByLayer: async (caseId, layerId) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/layers/${layerId}/features`);
+    return data;
+  },
+
+  getSingleFeature: async (caseId, layerId, featureNumber) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/layers/${layerId}/features/${featureNumber}`);
     return data;
   },
 
@@ -45,38 +70,53 @@ const layerService = {
     return data;
   },
 
-  // Replace addComment and add getCommentImage
-  addComment: async (caseId, featureNumber, comment, imageFile = null) => {
-    /*
+  // Add comment to a feature
+  addComment: async (caseId, layerId, featureNumber, comment, imageFile = null) => {
+    const parsedNum = parseInt(featureNumber, 10);
     const formData = new FormData();
     formData.append("case_id", caseId);
-    formData.append("feature_number", featureNumber);
+    formData.append("layer_id", layerId);
+    formData.append("feature_number", Number.isFinite(parsedNum) ? parsedNum : featureNumber);
     formData.append("comment", comment);
     if (imageFile) {
       formData.append("attachment", imageFile);
     }
 
-    const { data } = await axiosInstance.post("/comments", formData, {
+    const { data } = await axiosInstance.post(`/cases/${caseId}/layers/${layerId}/comments`, formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return data;
-    */
-    return { status: "success", message: "Comment saved (mocked)" };
   },
 
-  getComments: async (caseId, featureNumber) => {
-    /*
-    const { data } = await axiosInstance.get(`/cases/${caseId}/features/${featureNumber}/comments`);
+  getComments: async (caseId, layerId, featureNumber) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/layers/${layerId}/features/${featureNumber}/comments`);
     return data;
-    */
-    return [];
   },
 
-  // src/api/layerService.js
+  getCommentsThread: async (caseId, layerId, featureNumber) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/layers/${layerId}/features/${featureNumber}/comments/thread`);
+    return data;
+  },
 
-  getCommentImage: async (commentId) => {
-    /*
-    const response = await axiosInstance.get(`/comments/${commentId}/attachment`, {
+  addReply: async (caseId, layerId, featureNumber, parentCommentId, comment, imageFile = null) => {
+    const formData = new FormData();
+    formData.append("case_id", caseId);
+    formData.append("layer_id", layerId);
+    formData.append("parent_comment_id", parentCommentId);
+    formData.append("comment", comment);
+    if (imageFile) {
+      formData.append("attachment", imageFile);
+    }
+    const { data } = await axiosInstance.post(
+      `/cases/${caseId}/layers/${layerId}/features/${featureNumber}/comments/reply`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return data;
+  },
+
+  getCommentImage: async (caseId, layerId, featureNumber, commentId) => {
+    const response = await axiosInstance.get(`/cases/${caseId}/layers/${layerId}/features/${featureNumber}/comments/${commentId}/attachment`, {
       responseType: "blob",
     });
 
@@ -86,8 +126,6 @@ const layerService = {
       reader.onerror = reject;
       reader.readAsDataURL(response.data);
     });
-    */
-    return null;
   },
   // GET /layers (no case_id)
   getAllLayers: async () => {
@@ -114,20 +152,14 @@ const layerService = {
   },
 
   replaceLayer: async (layerId, payload) => {
-    if (payload.case_id !== undefined) {
-      const { data } = await axiosInstance.put(`/layers/${layerId}`, {
-        case_id: payload.case_id,
-        name: payload.name,
-        layer_type: payload.layer_type || "group",
-        visible: payload.visible ?? true,
-      });
-      return data;
-    } else {
-      const { data } = await axiosInstance.patch(`/layers/${layerId}`, {
-        name: payload.name,
-      });
-      return data;
-    }
+    const caseId = payload.case_id || 1;
+    const { data } = await axiosInstance.put(`/layers/case/${caseId}/${layerId}`, {
+      case_id: caseId,
+      name: payload.name,
+      layer_type: payload.layer_type || "group",
+      visible: payload.visible ?? true,
+    });
+    return data;
   },
 
   runUnion: async (payload) => {
@@ -162,11 +194,6 @@ const layerService = {
 
   runConvexHull: async (payload) => {
     const { data } = await axiosInstance.post("/vector/convex-hull", payload);
-    return data;
-  },
-
-  getFeaturesByCase: async (caseId) => {
-    const { data } = await axiosInstance.get(`/cases/${caseId}/features`);
     return data;
   },
 };

@@ -22,5 +22,12 @@ export const getErrorMessage = (err) => {
     }
   }
 
+  if (typeof msg === "string") {
+    msg = msg
+      .replace(/\s*\(?Request\s*ID:\s*[^\s)]+\)?/gi, "")
+      .replace(/\s*\(?request_id:\s*[^\s)]+\)?/gi, "")
+      .trim();
+  }
+
   return msg;
 };

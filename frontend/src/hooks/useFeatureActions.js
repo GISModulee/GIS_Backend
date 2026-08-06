@@ -44,13 +44,66 @@ export function useFeatureActions(loadLayersFromBackend) {
       dispatch(updateFeature({ layerLocalId, featureLocalId, changes: { name } }));
       if (BACKEND_ENABLED && backendId) {
         try {
-          await layerService.updateFeature(backendId, { name });
+          const targetLayer = items.find((l) => l.localId === layerLocalId);
+          const layerId = targetLayer?.backendId;
+
+          // Resolve case ID dynamically
+          const currentMatch = window.location.pathname.match(/\/map\/(\d+)/);
+          const resolvedCaseId = currentMatch ? parseInt(currentMatch[1], 10) : activeCaseIdFromStore;
+
+          const featureData = targetLayer?.features.find((f) => f.localId === featureLocalId);
+
+          if (featureData && layerId) {
+            const geometryForBackend = { ...featureData.geometry };
+            let center = undefined;
+            let radius = undefined;
+
+            const isCircle = featureData.type === "circle";
+
+            if (geometryForBackend.center) {
+              if (isCircle) {
+                center = {
+                  lat: parseFloat(geometryForBackend.center.lat),
+                  lng: parseFloat(geometryForBackend.center.lng),
+                };
+              }
+              delete geometryForBackend.center;
+            }
+            if (geometryForBackend.radius) {
+              if (isCircle) {
+                radius = parseFloat(geometryForBackend.radius);
+              }
+              delete geometryForBackend.radius;
+            }
+
+            if (isCircle && !center && geometryForBackend.coordinates && typeof geometryForBackend.coordinates[0] === "number") {
+              const [lng, lat] = geometryForBackend.coordinates;
+              center = { lat, lng };
+            }
+
+            const payload = {
+              name: name,
+              layer_id: layerId,
+              case_id: resolvedCaseId,
+              created_by: 1,
+              geometry: geometryForBackend,
+              geometry_type: featureData.type
+                ? featureData.type.charAt(0).toUpperCase() + featureData.type.slice(1)
+                : "Polygon",
+              properties: featureData.properties || {},
+              ...(center && { center }),
+              ...(radius && { radius }),
+            };
+
+            await layerService.editFeatureInLayer(resolvedCaseId, layerId, backendId, payload);
+            await loadLayersFromBackend();
+          }
         } catch (err) {
           console.error("[renameFeature]", err);
         }
       }
     },
-    [dispatch, items]
+    [dispatch, loadLayersFromBackend, items, activeCaseIdFromStore]
   );
 
   const removeFeature = useCallback(
@@ -58,7 +111,9 @@ export function useFeatureActions(loadLayersFromBackend) {
       dispatch(deleteFeature({ layerLocalId, featureLocalId }));
       if (BACKEND_ENABLED && backendId) {
         try {
-          const res = await layerService.deleteFeature(backendId);
+          const targetLayer = items.find((l) => l.localId === layerLocalId);
+          const layerId = targetLayer?.backendId || 16;
+          const res = await layerService.deleteFeature(activeCaseId, layerId, backendId);
           toast.success(res?.message || res?.detail || "Feature deleted successfully");
         } catch (err) {
           console.error("[removeFeature]", err);
@@ -68,14 +123,40 @@ export function useFeatureActions(loadLayersFromBackend) {
         toast.success("Feature deleted successfully");
       }
     },
-    [dispatch]
+    [dispatch, items, activeCaseId]
   );
 
   const toggleFeatureVis = useCallback(
-    (layerLocalId, featureLocalId) => {
+    async (layerLocalId, featureLocalId) => {
+      const fromLayer = items.find((l) => l.localId === layerLocalId);
+      const featureData = fromLayer?.features.find((f) => f.localId === featureLocalId);
+      if (!featureData) return;
+
+      const newVisible = !featureData.visible;
       dispatch(toggleFeatureVisible({ layerLocalId, featureLocalId }));
+
+      if (BACKEND_ENABLED && featureData.backendId && fromLayer.backendId) {
+        try {
+          const currentMatch = window.location.pathname.match(/\/map\/(\d+)/);
+          const resolvedCaseId = currentMatch ? parseInt(currentMatch[1], 10) : activeCaseIdFromStore;
+
+          await layerService.editFeaturePartialInLayer(
+            resolvedCaseId,
+            fromLayer.backendId,
+            featureData.backendId,
+            {
+              properties: {
+                ...(featureData.properties || {}),
+                visible: newVisible,
+              },
+            }
+          );
+        } catch (err) {
+          console.error("[toggleFeatureVis]", err);
+        }
+      }
     },
-    [dispatch]
+    [dispatch, items, activeCaseIdFromStore]
   );
 
   const dragFeature = useCallback(
@@ -91,54 +172,20 @@ export function useFeatureActions(loadLayersFromBackend) {
 
       dispatch(moveFeature({ featureLocalId, fromLayerLocalId, toLayerLocalId }));
 
-      if (BACKEND_ENABLED && featureBackendId && toLayerBackendId && featureData) {
+      const fromLayerBackendId = fromLayer?.backendId;
+
+      // Resolve case ID dynamically
+      const currentMatch = window.location.pathname.match(/\/map\/(\d+)/);
+      const resolvedCaseId = currentMatch ? parseInt(currentMatch[1], 10) : activeCaseIdFromStore;
+
+      if (BACKEND_ENABLED && featureBackendId && fromLayerBackendId && toLayerBackendId && featureData) {
         try {
-          const geometryForBackend = { ...featureData.geometry };
-          let center = undefined;
-          let radius = undefined;
-
-          const isCircle = featureData.type === "circle";
-
-          if (geometryForBackend.center) {
-            if (isCircle) {
-              center = {
-                lat: parseFloat(geometryForBackend.center.lat),
-                lng: parseFloat(geometryForBackend.center.lng),
-              };
-            }
-            delete geometryForBackend.center;
-          }
-          if (geometryForBackend.radius) {
-            if (isCircle) {
-              radius = parseFloat(geometryForBackend.radius);
-            }
-            delete geometryForBackend.radius;
-          }
-
-          if (isCircle && !center && geometryForBackend.coordinates && typeof geometryForBackend.coordinates[0] === "number") {
-            const [lng, lat] = geometryForBackend.coordinates;
-            center = { lat, lng };
-          }
-
-          // Resolve case ID dynamically
-          const currentMatch = window.location.pathname.match(/\/map\/(\d+)/);
-          const resolvedCaseId = currentMatch ? parseInt(currentMatch[1], 10) : activeCaseIdFromStore;
-
-          const payload = {
-            name: featureData.name,
-            layer_id: toLayerBackendId,
-            case_id: resolvedCaseId,
-            created_by: 1,
-            geometry: geometryForBackend,
-            geometry_type: featureData.type
-              ? featureData.type.charAt(0).toUpperCase() + featureData.type.slice(1)
-              : "Polygon",
-            properties: featureData.properties || {},
-            ...(center && { center }),
-            ...(radius && { radius }),
-          };
-
-          const res = await layerService.replaceFeature(featureBackendId, payload);
+          const res = await layerService.editFeaturePartialInLayer(
+            resolvedCaseId,
+            fromLayerBackendId, // Use source layer ID in the path
+            featureBackendId,
+            { layer_id: toLayerBackendId }
+          );
           toast.success(res?.message || res?.detail || "Feature moved successfully");
           await loadLayersFromBackend();
         } catch (err) {

@@ -5,7 +5,7 @@ import L from "leaflet";
 import { useLayers } from "@/hooks/useLayers.js";
 import { selectFeature, openCommentModal } from "@/state/layersSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
-import { buildTooltipHTML, loadComments } from "@/utils/TooltipUtils.js";
+import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
 
 export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef }) {
   const leafletMap = useLeafletMap();
@@ -13,7 +13,7 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
   const { items } = useLayers();
   const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
-  const hoveredFeatureId = useSelector((s) => s.layers.hoveredFeatureId);
+
 
   // Initialize a single canvas renderer to group draw calls on the GPU
   const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
@@ -31,15 +31,15 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         const isFeatureSelected = selectedFeatureId && feature.backendId === selectedFeatureId;
         const isLayerSelected = selectedLayerId && layer.localId === selectedLayerId;
         const isSelected = isFeatureSelected || isLayerSelected;
-        const isHovered = hoveredFeatureId && (feature.localId === hoveredFeatureId || feature.backendId === hoveredFeatureId);
+      
 
         const shouldShow = layer.visible && feature.visible;
 
         const style = {
-          color: isHovered ? "#111827" : (isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb")),
-          weight: isHovered ? 6 : (isSelected ? 5 : 2),
+          color: isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb"),
+          weight: isSelected ? 5 : 2,
           opacity: 1,
-          fillOpacity: isHovered ? 0.6 : (isSelected ? 0.35 : 0.15),
+          fillOpacity: isSelected ? 0.35 : 0.15,
         };
 
         // Update existing layer
@@ -72,19 +72,19 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         //     radius: radius,
         //     ...style,
         //     noWrap: true
-        //   });
         if (centerLatLng && radius != null) {
           // 1. Calculate the latitude distortion factor (cos of latitude)
-          const rad = (centerLatLng.lat * Math.PI) / 180;
+          const rad = (centerLatLng[0] * Math.PI) / 180;
           const projectionFactor = Math.cos(rad);
 
           // 2. Pass the corrected options to lock the rendering ratio
           const leafletLayer = L.circle(centerLatLng, {
             radius: radius,
-            renderer: canvasRenderer,
             ...style,
-            noWrap: true
+            interactive: true,
           });
+
+
 
           leafletLayer.on("click", function (e) {
             L.DomEvent.stopPropagation(e);
@@ -142,7 +142,6 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
                 .setLatLng(e.latlng)
                 .setContent(buildTooltipHTML(currentFeature, currentLayer || layer, area))
                 .openOn(leafletMap);
-              setTimeout(() => loadComments(currentFeature), 50);
             } catch (_) { }
           });
 
@@ -151,7 +150,7 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         }
       });
     });
-  }, [items, leafletMap, selectedFeatureId, selectedLayerId, hoveredFeatureId, featureRefs, itemsRef, activeToolRef, dispatch]);
+  }, [items, leafletMap, selectedFeatureId, selectedLayerId, featureRefs, itemsRef, activeToolRef, dispatch]);
 
   return null;
 }

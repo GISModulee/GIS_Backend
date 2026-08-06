@@ -50,9 +50,10 @@ export function useLayerActions() {
 
   const renameLayer = useCallback(
     async (localId, backendId, name) => {
-      if (BACKEND_ENABLED && backendId) {
+      const layer = items.find((l) => l.localId === localId);
+      if (BACKEND_ENABLED && backendId && layer) {
         try {
-          await layerService.updateLayer(backendId, { name });
+          await layerService.updateLayer(activeCaseId, backendId, { name });
           dispatch(updateLayer({ localId, changes: { name } }));
         } catch (err) {
           console.error("[renameLayer]", err);
@@ -62,31 +63,35 @@ export function useLayerActions() {
         dispatch(updateLayer({ localId, changes: { name } }));
       }
     },
-    [dispatch]
+    [dispatch, items, activeCaseId]
   );
 
-  const removeLayer = useCallback(
+   const removeLayer = useCallback(
     async (localId, backendId) => {
       const layer = items.find((l) => l.localId === localId);
-      if (BACKEND_ENABLED && layer && layer.features) {
-        for (const feature of layer.features) {
-          if (feature.backendId) {
-            try {
-              await layerService.deleteFeature(feature.backendId);
-            } catch (err) {
-              console.error(
-                `[removeLayer] Failed to delete feature ${feature.backendId}:`,
-                err
-              );
-            }
-          }
+      const isGeoclipOrImageLayer =
+        (layer && (layer.type === 'geoclip' || layer.type === 'geoclip_prediction')) ||
+        (layer && layer.name && /\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(layer.name));
+
+      if (BACKEND_ENABLED && isGeoclipOrImageLayer) {
+        try {
+          await layerService.deleteGeoclipLayer(layer.backendId || backendId);
+          toast.success('Image layer deleted successfully');
+        } catch (err) {
+          console.error('[removeLayer][geoclip/image]', err);
+          toast.error(err.response?.data?.message || err.response?.data?.detail || err.message || 'Failed to delete image layer');
         }
+        // Use dedicated geoclip/image deletion — skip the regular layer deletion flow
+        dispatch(deleteLayer(localId));
+        return;
       }
 
+      // For regular layers: remove from Redux first for instant UI feedback,
+      // then ask the backend to delete the layer (backend cascades feature deletion).
       dispatch(deleteLayer(localId));
       if (BACKEND_ENABLED && backendId) {
         try {
-          const res = await layerService.deleteLayer(backendId);
+          const res = await layerService.deleteLayer(activeCaseId, backendId);
           toast.success(res?.message || res?.detail || "Layer deleted successfully");
         } catch (err) {
           console.error("[removeLayer]", err);
@@ -96,21 +101,22 @@ export function useLayerActions() {
         toast.success("Layer deleted successfully");
       }
     },
-    [dispatch, items]
+    [dispatch, items, activeCaseId]
   );
+
 
   const toggleVisible = useCallback(
     async (localId, backendId, current) => {
       dispatch(toggleLayerVisible(localId));
       if (BACKEND_ENABLED && backendId) {
         try {
-          await layerService.updateLayer(backendId, { visible: !current });
+          await layerService.updateLayer(activeCaseId, backendId, { visible: !current });
         } catch (err) {
           console.error("[toggleVisible]", err);
         }
       }
     },
-    [dispatch]
+    [dispatch, activeCaseId]
   );
 
   const expandLayer = useCallback(

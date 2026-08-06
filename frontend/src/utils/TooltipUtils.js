@@ -32,8 +32,9 @@ export async function loadComments(feature) {
   const el = document.getElementById(`tooltip-comments-${feature.localId}`);
   if (!el) return;
 
+  const layerId = feature.layer_id || 16;
   try {
-    const comments = await layerService.getComments(caseId, featureNumber);
+    const comments = await layerService.getComments(caseId, layerId, featureNumber);
 
     if (!comments || comments.length === 0) {
       el.innerHTML = `<span style="color:#aaa;font-size:12px;">No comments</span>`;
@@ -45,7 +46,7 @@ export async function loadComments(feature) {
         let imgSrc = null;
         if (c.has_image || c.image_id || c.image) {
           try {
-            imgSrc = await layerService.getCommentImage(c.id);
+            imgSrc = await layerService.getCommentImage(caseId, layerId, featureNumber, c.id);
           } catch (_) { }
         }
         return { ...c, imgSrc };

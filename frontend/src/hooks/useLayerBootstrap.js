@@ -17,31 +17,52 @@ export function useLayerBootstrap() {
       const layers = await layerService.getAllForCase(activeCaseId);
       console.log("[loadLayersFromBackend] layers:", layers);
 
-      let allFeaturesForCase = [];
-      try {
-        const res = await layerService.getFeaturesByCase(activeCaseId);
-        if (Array.isArray(res)) {
-          allFeaturesForCase = res;
-        } else if (res && Array.isArray(res.features)) {
-          allFeaturesForCase = res.features;
-        } else if (res && Array.isArray(res.data)) {
-          allFeaturesForCase = res.data;
-        }
-      } catch (err) {
-        console.error("Failed to load features for case:", err);
-      }
-
       const hydrated = await Promise.all(
         layers.map(async (layer) => {
           const layerLocalId = `local_${layer.id}`;
 
-          // Filter features belonging to this layer
-          const featuresList = allFeaturesForCase.filter((f) => Number(f.layer_id) === Number(layer.id));
+          const isGeoclipLayer = layer.layer_type === "geoclip";
 
-          const isImagePredictionLayer = layer.name && /\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(layer.name);
+          let featuresList = [];
+          try {
+            const res = isGeoclipLayer
+              ? await layerService.getGeoclipFeatures(layer.id)
+              : await layerService.getFeaturesByLayer(activeCaseId, layer.id);
+            if (Array.isArray(res)) {
+              featuresList = res;
+            } else if (res && Array.isArray(res.features)) {
+              featuresList = res.features;
+            } else if (res && Array.isArray(res.data)) {
+              featuresList = res.data;
+            }
+          } catch (err) {
+            console.warn(`[Bootstrap] Failed to fetch layer features for layer ${layer.id}:`, err);
+          }
+
+          const isImagePredictionLayer = isGeoclipLayer || (layer.name && /\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(layer.name));
 
           const features = await Promise.all(
-            featuresList.map(async (f, index) => {
+            featuresList.map(async (rawItem, index) => {
+              const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
+              const initialFeatureNumber =
+                toInt(rawItem.feature_number) ??
+                toInt(rawItem.properties?.feature_number) ??
+                toInt(rawItem.id) ??
+                (index + 1);
+
+              let f = rawItem;
+              // Skip per-feature detail fetch for geoclip layers — they use a different API path
+              if (!isGeoclipLayer) {
+                try {
+                  const singleRes = await layerService.getSingleFeature(activeCaseId, layer.id, initialFeatureNumber);
+                  if (singleRes && typeof singleRes === "object") {
+                    f = { ...rawItem, ...singleRes };
+                  }
+                } catch (err) {
+                  console.warn(`[Bootstrap] Failed to fetch single feature ${initialFeatureNumber} for layer ${layer.id}:`, err);
+                }
+              }
+
               let geometry = f.geometry;
               if (typeof geometry === "string") {
                 try {
@@ -78,15 +99,16 @@ export function useLayerBootstrap() {
                 };
               }
 
-              let commentsList = [];
-              try {
-                commentsList = await layerService.getComments(activeCaseId, f.feature_number);
-              } catch (_) { }
+              const resolvedFeatureNumber =
+                toInt(f.feature_number) ??
+                toInt(f.properties?.feature_number) ??
+                toInt(f.id) ??
+                initialFeatureNumber;
 
               return {
-                localId: `local_feat_${f.id}`,
-                backendId: f.id,
-                feature_number: f.feature_number,
+                localId: `local_feat_${f.id || initialFeatureNumber}`,
+                backendId: f.id || initialFeatureNumber,
+                feature_number: resolvedFeatureNumber,
                 case_id: f.case_id || activeCaseId,
                 layer_id: f.layer_id || layer.id,
                 layerLocalId,
@@ -102,7 +124,9 @@ export function useLayerBootstrap() {
                 category: properties?.category ?? f.category ?? "",
                 visible: isImagePredictionLayer ? (index < 5) : true,
                 error: null,
-                commentsList,
+                commentsList: Array.isArray(f.comments) ? f.comments : (Array.isArray(f.commentsList) ? f.commentsList : []),
+                comments_count: typeof f.comments_count === "number" ? f.comments_count : (Array.isArray(f.comments) ? f.comments.length : 0),
+                hasComments: (typeof f.comments_count === "number" && f.comments_count > 0) || (Array.isArray(f.comments) && f.comments.length > 0) || (Array.isArray(f.commentsList) && f.commentsList.length > 0),
               };
             })
           );

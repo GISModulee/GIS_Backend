@@ -2,7 +2,7 @@
 import { useState, useRef } from "react";
 import { X, Check, Paperclip, FileText } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
-import { closeCommentModal } from "@/state/layersSlice.js";
+import { closeCommentModal, setFeatureHasComments } from "@/state/layersSlice.js";
 import layerService from "@/utils/layerService.js";
 import { useMap } from "@/hooks/useMap.js";
 import { useLayers } from "@/hooks/useLayers.js";
@@ -43,22 +43,55 @@ export default function CommentModal() {
       const feature = allFeatures.find(
         (f) => Number(f.backendId) === Number(featureBackendId) || String(f.backendId) === String(featureBackendId)
       );
+      const owningLayer = feature
+        ? items.find((l) => l.localId === feature.layerLocalId)
+        : null;
+
       const currentMatch = window.location.pathname.match(/\/map\/(\d+)/);
       const resolvedCaseId = currentMatch ? parseInt(currentMatch[1], 10) : null;
       const caseId = feature?.case_id || feature?.properties?.case_id || resolvedCaseId;
-      const featureNumber = feature?.feature_number || feature?.properties?.feature_no || feature?.properties?.feature_number;
+      const layerId = owningLayer?.backendId || feature?.layer_id;
 
-      if (!caseId || !featureNumber) {
-        throw new Error(`Could not find caseId (${caseId}) or featureNumber (${featureNumber}) for this feature.`);
+      const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
+      let featureNumber = toInt(feature?.feature_number)
+        || toInt(feature?.properties?.feature_no)
+        || toInt(feature?.properties?.feature_number)
+        || null;
+
+      // Fetch live from layer features endpoint first, then get single feature details
+      if (caseId && layerId && featureBackendId) {
+        try {
+          const layerFeatures = await layerService.getFeaturesByLayer(caseId, layerId);
+          const match = Array.isArray(layerFeatures)
+            ? layerFeatures.find((lf) => Number(lf.id) === Number(featureBackendId))
+            : null;
+          const resolvedNum = toInt(match?.feature_number) || toInt(match?.id) || featureNumber;
+          if (resolvedNum) {
+            featureNumber = resolvedNum;
+            try {
+              const singleFeat = await layerService.getSingleFeature(caseId, layerId, featureNumber);
+              if (singleFeat) {
+                const singleNum = toInt(singleFeat.feature_number) || toInt(singleFeat.id);
+                if (singleNum) featureNumber = singleNum;
+              }
+            } catch (_) { }
+          }
+        } catch (lookupErr) {
+          console.warn("[CommentModal] feature lookup failed:", lookupErr);
+        }
       }
 
-      await layerService.addComment(caseId, featureNumber, comment.trim(), imageFile);
+      if (!caseId || !layerId || !featureNumber) {
+        throw new Error(`Could not resolve caseId (${caseId}), layerId (${layerId}), or featureNumber (${featureNumber}) for this feature.`);
+      }
+
+      await layerService.addComment(caseId, layerId, featureNumber, comment.trim(), imageFile);
+      dispatch(setFeatureHasComments({ backendId: featureBackendId, hasComments: true }));
       setComment("");
       setImageFile(null);
       setPreview(null);
       dispatch(closeCommentModal());
       changeActiveTool("select");
-      await loadLayersFromBackend();
       toast.success("Comment saved successfully!");
     } catch (err) {
       console.error("[CommentModal] error:", err);

@@ -81,18 +81,11 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    // If we get a 404 or 503 error, append request_id to error details so components display it without duplicating toasts
+    // If we get a 404 or 503 error, use detail/message without appending request_id to user-facing details
     if (err.response?.status === 404 || err.response?.status === 503) {
       const errorData = err.response?.data;
       const detail = errorData?.detail || errorData?.message || "Server Error";
-      const requestId = errorData?.request_id;
-      const displayMsg = requestId ? `${detail} (Request ID: ${requestId})` : detail;
-
-      if (errorData) {
-        errorData.detail = displayMsg;
-        errorData.message = displayMsg;
-      }
-      err.message = displayMsg;
+      err.message = detail;
     }
 
     if (import.meta.env.DEV) {

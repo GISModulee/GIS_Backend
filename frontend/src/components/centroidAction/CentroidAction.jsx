@@ -34,62 +34,19 @@ export default function CentroidAction({ onCancel }) {
     }
 
     setLoading(true);
-    const toastId = toast.loading("Computing and saving centroid layer...");
+    const toastId = toast.loading("Computing centroid...");
     try {
-      const nameA = featAObj.name || "Feature";
-      const name = resultName.trim() || `Centroid (${nameA})`;
-
       const response = await layerService.runCentroid({
         case_id: activeCaseId,
         feature_number: featAObj.feature_number,
+        layer_name: resultName.trim() || undefined,
+        name: resultName.trim() || undefined,
       });
 
-      const feat = response?.features ? response.features[0] : response;
-      let geom = feat?.geometry || feat;
-
-      if (typeof geom === "string") {
-        try {
-          geom = JSON.parse(geom);
-        } catch (_) { }
-      }
-
-      if (!geom) {
-        toast.error("No result geometry returned from backend.", { id: toastId });
-        setLoading(false);
-        return;
-      }
-
-      // 1. Create a separate layer on the backend
-      const newLayer = await layerService.createLayer({
-        case_id: activeCaseId,
-        name: name,
-        layer_type: "auto",
-        visible: true,
-        opacity: 1,
-        color: "#ec4899",
-      });
-
-      const layerId = newLayer?.id ?? newLayer?.layer_id;
-
-      if (!newLayer || layerId === undefined || layerId === null) {
-        throw new Error(`Failed to create result layer: ${JSON.stringify(newLayer)}`);
-      }
-
-      // 2. Save the computed feature to this newly created layer
-      const saveRes = await layerService.createFeature({
-        name,
-        layer_id: layerId,
-        case_id: activeCaseId,
-        created_by: 1,
-        geometry: geom,
-        geometry_type: geom.type || "Point",
-        properties: { name, color: "#ec4899" },
-      });
-
-      // Reload layers from backend to render the new layer and feature
+      // Backend creates the layer automatically — just reload to reflect it
       await loadLayersFromBackend();
 
-      toast.success(saveRes?.message || response?.message || newLayer?.message || "✓ Centroid layer created and added to map!", { id: toastId });
+      toast.success(response?.message || "✓ Centroid layer created and added to map!", { id: toastId });
       if (onCancel) onCancel();
     } catch (e) {
       console.error(e);
@@ -98,6 +55,7 @@ export default function CentroidAction({ onCancel }) {
       setLoading(false);
     }
   };
+
 
   return (
     <div className="space-y-2 pt-1 border-t border-gray-100 dark:border-gray-800">

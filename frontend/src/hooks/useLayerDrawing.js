@@ -123,6 +123,33 @@ export function useLayerDrawing() {
             })
           );
 
+          // If the backend didn't return feature_number (flat /features endpoint),
+          // fetch the layer features list to resolve it and update Redux.
+          if (!featureRes.feature_number) {
+            try {
+              const resolvedLayerId = featureRes.layer_id || backendLayerId;
+              const savedFeatureId = featureRes.feature_id || featureRes.id;
+              const layerFeatures = await layerService.getFeaturesByLayer(resolvedCaseId, resolvedLayerId);
+              const match = Array.isArray(layerFeatures)
+                ? layerFeatures.find((lf) => Number(lf.id) === Number(savedFeatureId))
+                : null;
+              if (match?.feature_number) {
+                dispatch(
+                  setFeatureBackendId({
+                    layerLocalId: selectedLayer?.localId || preLayerLocalId,
+                    featureLocalId: preFeatureLocalId,
+                    backendId: savedFeatureId,
+                    feature_number: match.feature_number,
+                    case_id: featureRes.case_id || resolvedCaseId,
+                    layer_id: resolvedLayerId,
+                  })
+                );
+              }
+            } catch (lookupErr) {
+              console.warn("[useLayerDrawing] Could not resolve feature_number after save:", lookupErr);
+            }
+          }
+
           if (selectedLayer && !selectedLayer.visible) {
             toast("Feature created successfully, but the active layer is hidden.", {
               icon: "⚠️",
