@@ -43,6 +43,16 @@ export default function FeatureRenderer({ featureRefs, itemsRef, activeToolRef }
       }
     }
   }, [items, leafletMap, selectedFeatureId, featureRefs, dispatch]);
+ 
+  // Close properties popup when feature selection is cleared
+  useEffect(() => {
+    if (!leafletMap) return;
+    if (!selectedFeatureId) {
+      try {
+        leafletMap.closePopup();
+      } catch (_) {}
+    }
+  }, [selectedFeatureId, leafletMap]);
 
   return (
     <>

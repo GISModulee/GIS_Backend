@@ -47,6 +47,7 @@ const layerService = {
 
   // Replace addComment and add getCommentImage
   addComment: async (caseId, featureNumber, comment, imageFile = null) => {
+    /*
     const formData = new FormData();
     formData.append("case_id", caseId);
     formData.append("feature_number", featureNumber);
@@ -59,16 +60,22 @@ const layerService = {
       headers: { "Content-Type": "multipart/form-data" },
     });
     return data;
+    */
+    return { status: "success", message: "Comment saved (mocked)" };
   },
 
   getComments: async (caseId, featureNumber) => {
+    /*
     const { data } = await axiosInstance.get(`/cases/${caseId}/features/${featureNumber}/comments`);
     return data;
+    */
+    return [];
   },
 
   // src/api/layerService.js
 
   getCommentImage: async (commentId) => {
+    /*
     const response = await axiosInstance.get(`/comments/${commentId}/attachment`, {
       responseType: "blob",
     });
@@ -79,6 +86,8 @@ const layerService = {
       reader.onerror = reject;
       reader.readAsDataURL(response.data);
     });
+    */
+    return null;
   },
   // GET /layers (no case_id)
   getAllLayers: async () => {

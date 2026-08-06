@@ -257,9 +257,16 @@ export default function FetchNewsModal({ onClose }) {
       });
 
       setNewsResults(articles);
+      if (response.data?.message || response.data?.detail) {
+        toast.success(response.data.message || response.data.detail);
+      } else {
+        toast.success(`Successfully found ${articles.length} news articles.`);
+      }
     } catch (err) {
       console.error("[FetchNews] Error:", err);
-      setErrorMsg(getErrorMessage(err));
+      const errMsg = getErrorMessage(err);
+      setErrorMsg(errMsg);
+      toast.error(errMsg);
     } finally {
       setLoading(false);
     }

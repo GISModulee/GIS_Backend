@@ -130,6 +130,7 @@ export default function ConvexHullAction({ onCancel }) {
           disabled={loading}
           multiple={true}
           placeholder="— select multiple features —"
+          allowedTypes={["point", "circle", "polygon", "rectangle", "polyline", "line", "linestring"]}
         />
       </div>
 

@@ -81,7 +81,7 @@ export default function RightSidebar({ className = "fixed top-14 right-0 h-[calc
   const [input, setInput] = useState("");
 
   return (
-    <aside className={`${className} w-72 bg-gray-50 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 z-20 flex flex-col`}>
+    <aside className={`${className} w-72 bg-gray-50 dark:bg-gray-900 border-l border-gray-200 dark:border-gray-800 z-[1010] flex flex-col`}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-4">
         <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">

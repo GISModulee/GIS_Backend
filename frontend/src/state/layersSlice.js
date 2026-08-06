@@ -137,14 +137,18 @@ const layersSlice = createSlice({
     selectFeature(state, action) {
       const id = action.payload;
       console.log("[layersSlice] selectFeature reducer called with ID:", id);
-      state.selectedFeatureId = id;
-      if (id) {
-        const layer = state.items.find((l) =>
-          l.features.some((f) => f.backendId === id || f.localId === id)
-        );
-        console.log("[layersSlice] Found parent layer to expand:", layer?.name);
-        if (layer) {
-          layer.expanded = true;
+      if (id && state.selectedFeatureId === id) {
+        state.selectedFeatureId = null;
+      } else {
+        state.selectedFeatureId = id;
+        if (id) {
+          const layer = state.items.find((l) =>
+            l.features.some((f) => f.backendId === id || f.localId === id)
+          );
+          console.log("[layersSlice] Found parent layer to expand:", layer?.name);
+          if (layer) {
+            layer.expanded = true;
+          }
         }
       }
     },

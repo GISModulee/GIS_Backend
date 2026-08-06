@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useMap as useLeafletMap } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import L from "leaflet";
@@ -14,6 +14,9 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
   const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
   const hoveredFeatureId = useSelector((s) => s.layers.hoveredFeatureId);
+
+  // Initialize a single canvas renderer to group draw calls on the GPU
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
 
   useEffect(() => {
     if (!leafletMap) return;
@@ -64,9 +67,21 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         }
         const radius = feature.radius || feature.properties?.radius || feature.geometry?.radius;
 
+        // if (centerLatLng && radius != null) {
+        //   const leafletLayer = L.circle(centerLatLng, {
+        //     radius: radius,
+        //     ...style,
+        //     noWrap: true
+        //   });
         if (centerLatLng && radius != null) {
+          // 1. Calculate the latitude distortion factor (cos of latitude)
+          const rad = (centerLatLng.lat * Math.PI) / 180;
+          const projectionFactor = Math.cos(rad);
+
+          // 2. Pass the corrected options to lock the rendering ratio
           const leafletLayer = L.circle(centerLatLng, {
-            radius,
+            radius: radius,
+            renderer: canvasRenderer,
             ...style,
             noWrap: true
           });
@@ -124,9 +139,9 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
                 autoPan: true,
                 autoPanPadding: [30, 30],
               })
-              .setLatLng(e.latlng)
-              .setContent(buildTooltipHTML(currentFeature, currentLayer || layer, area))
-              .openOn(leafletMap);
+                .setLatLng(e.latlng)
+                .setContent(buildTooltipHTML(currentFeature, currentLayer || layer, area))
+                .openOn(leafletMap);
               setTimeout(() => loadComments(currentFeature), 50);
             } catch (_) { }
           });

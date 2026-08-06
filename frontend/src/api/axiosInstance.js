@@ -2,7 +2,7 @@ import axios from "axios";
 import { API_URLS, API_CONFIG } from "@/config/apiConfig.js";
 
 const axiosInstance = axios.create({
-  timeout: API_CONFIG.TIMEOUT,
+  // timeout: API_CONFIG.TIMEOUT,
   headers: {
     ...API_CONFIG.HEADERS,
   },
@@ -56,24 +56,28 @@ axiosInstance.interceptors.response.use(
   async (err) => {
     const isBoundaryRequest = err.config?.url && err.config.url.startsWith("/boundaries");
 
-    // If the backend is off (network/connection error), redirect to login and flag for toast msg
+    // Do not redirect or clear storage if the request was explicitly canceled/aborted
+    if (axios.isCancel?.(err) || err.name === "CanceledError" || err.code === "ERR_CANCELED") {
+      return Promise.reject(err);
+    }
+
+    // If the backend has a connection error or timeout, do not force-log out the user.
+    // Wiping local storage on a transient network overload is highly disruptive.
     if (!err.response) {
-      if (!isBoundaryRequest && window.location.pathname !== "/login") {
-        const theme = localStorage.getItem("theme");
-        localStorage.clear();
-        if (theme) localStorage.setItem("theme", theme);
-        sessionStorage.setItem("network_error_toast", "true");
-        window.location.href = "/login";
+      if (import.meta.env.DEV) {
+        console.error("[API Network Error]:", err);
       }
       return Promise.reject(err);
     }
 
     // If we get a 401 Unauthorized, clear state and redirect to login
     if (err.response?.status === 401 && !isBoundaryRequest) {
-      const theme = localStorage.getItem("theme");
-      localStorage.clear();
-      if (theme) localStorage.setItem("theme", theme);
-      window.location.href = "/login";
+      if (window.location.pathname !== "/login") {
+        const theme = localStorage.getItem("theme");
+        localStorage.clear();
+        if (theme) localStorage.setItem("theme", theme);
+        window.location.href = "/login";
+      }
       return Promise.reject(err);
     }
 

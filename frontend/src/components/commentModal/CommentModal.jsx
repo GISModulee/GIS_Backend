@@ -40,12 +40,16 @@ export default function CommentModal() {
     setLoading(true);
     try {
       const allFeatures = items.flatMap((layer) => layer.features || []);
-      const feature = allFeatures.find((f) => f.backendId === featureBackendId);
-      const caseId = feature?.case_id;
-      const featureNumber = feature?.feature_number;
+      const feature = allFeatures.find(
+        (f) => Number(f.backendId) === Number(featureBackendId) || String(f.backendId) === String(featureBackendId)
+      );
+      const currentMatch = window.location.pathname.match(/\/map\/(\d+)/);
+      const resolvedCaseId = currentMatch ? parseInt(currentMatch[1], 10) : null;
+      const caseId = feature?.case_id || feature?.properties?.case_id || resolvedCaseId;
+      const featureNumber = feature?.feature_number || feature?.properties?.feature_no || feature?.properties?.feature_number;
 
       if (!caseId || !featureNumber) {
-        throw new Error("Could not find case_id or feature_number for this feature.");
+        throw new Error(`Could not find caseId (${caseId}) or featureNumber (${featureNumber}) for this feature.`);
       }
 
       await layerService.addComment(caseId, featureNumber, comment.trim(), imageFile);

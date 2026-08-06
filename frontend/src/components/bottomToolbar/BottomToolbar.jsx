@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { useSelector, useDispatch } from "react-redux";
+import { openCommentModal } from "@/state/layersSlice.js";
+import toast from "react-hot-toast";
 import {
   MousePointer2,
   Pencil,
@@ -37,6 +40,9 @@ const DRAW_OPTIONS = [
 
 export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZoomOut }) {
   const [openDropdown, setOpenDropdown] = useState(null);
+  const dispatch = useDispatch();
+  const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
+  const items = useSelector((s) => s.layers.items);
 
   const selectActive = ["select", ...SELECT_OPTIONS.map((o) => o.id)].includes(
     activeTool,
@@ -108,7 +114,23 @@ export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZ
       <IconButton
         label="Comment"
         active={activeTool === "comment"}
-        onClick={() => pick("comment")}
+        onClick={() => {
+          if (selectedFeatureId) {
+            const allFeatures = items.flatMap((l) => l.features || []);
+            const feature = allFeatures.find(
+              (f) => f.backendId === selectedFeatureId || f.localId === selectedFeatureId
+            );
+            if (feature) {
+              if (feature.backendId) {
+                dispatch(openCommentModal(feature.backendId));
+              } else {
+                toast.error("Save this feature first before adding a comment.");
+              }
+              return;
+            }
+          }
+          pick("comment");
+        }}
       >
         <MessageSquare size={16} />
       </IconButton>

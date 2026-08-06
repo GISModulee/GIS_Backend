@@ -99,9 +99,9 @@ export default function MapWorkspace() {
     <div className="flex flex-col h-screen overflow-hidden">
       <Header onToggleSidebar={() => setSidebarOpen((p) => !p)} />
       <div
-        className="relative flex-1 transition-all duration-300"
+        className="relative flex-1"
         style={{
-          marginLeft: sidebarOpen ? SIDEBAR_WIDTH : 0,
+          marginLeft: 0,
           marginRight: RIGHT_WIDTH,
         }}
       >

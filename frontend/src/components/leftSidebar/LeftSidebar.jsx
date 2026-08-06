@@ -1,5 +1,5 @@
 // src/components/leftSidebar/LeftSidebar.jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Search,
   Layers,
@@ -16,18 +16,24 @@ export default function LeftSidebar({ isOpen, onClose }) {
   const [showDataSources, setShowDataSources] = useState(false);
   const [showNewsModal, setShowNewsModal] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen) {
+      setShowDataSources(false);
+    }
+  }, [isOpen]);
+
   return (
     <>
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 bg-black/30 z-10 md:hidden"
+          className="fixed inset-0 bg-black/30 z-[1009] md:hidden"
         />
       )}
 
       <aside
         className={`fixed top-14 left-0 h-[calc(100vh-56px)] w-72 bg-gray-50 dark:bg-gray-950 border-r
-          border-gray-200 dark:border-gray-800 z-20 flex flex-col transition-all duration-300
+          border-gray-200 dark:border-gray-800 z-[1010] flex flex-col transition-all duration-300
           ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
       >
         <div className="flex-1 overflow-y-auto p-4 space-y-4">

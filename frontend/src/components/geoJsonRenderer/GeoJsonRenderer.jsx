@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useMap as useLeafletMap } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import L from "leaflet";
@@ -34,6 +34,9 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
   const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
   const hoveredFeatureId = useSelector((s) => s.layers.hoveredFeatureId);
+
+  // Initialize a single canvas renderer to group draw calls on the GPU
+  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
 
   useEffect(() => {
     if (!leafletMap) return;
@@ -84,6 +87,7 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
         const geojson = { type: "Feature", geometry: feature.geometry, properties: {} };
         const leafletLayer = L.geoJSON(geojson, {
           style,
+          renderer: canvasRenderer,
           onEachFeature: (_f, lyr) => {
             // Click to select and show properties
             lyr.on("click", function (e) {
@@ -139,9 +143,9 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
                   autoPan: true,
                   autoPanPadding: [30, 30],
                 })
-                .setLatLng(e.latlng)
-                .setContent(buildTooltipHTML(currentFeature, currentLayer || layer, area))
-                .openOn(leafletMap);
+                  .setLatLng(e.latlng)
+                  .setContent(buildTooltipHTML(currentFeature, currentLayer || layer, area))
+                  .openOn(leafletMap);
                 setTimeout(() => loadComments(currentFeature), 50);
               } catch (_) { }
             });
@@ -149,7 +153,7 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
 
           pointToLayer: (_f, latlng) => {
             const radius = feature.geometry?.radius;
-            if (radius != null) return L.circle(latlng, { radius, ...style });
+            if (radius != null) return L.circle(latlng, { radius, renderer: canvasRenderer, ...style });
             const color = isHovered ? "#111827" : (isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb"));
             return L.marker(latlng, {
               icon: customPinIcon(color, isSelected || isHovered)

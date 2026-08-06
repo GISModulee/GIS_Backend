@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Sun, Moon } from "lucide-react";
+import { useDispatch } from "react-redux";
+import { setBasemap } from "@/state/mapSlice.js";
 
 export default function ThemeToggle({ className = "" }) {
   const [isDark, setIsDark] = useState(false);
+  const dispatch = useDispatch();
 
   useEffect(() => {
     // Check initial theme from localStorage
@@ -11,6 +14,7 @@ export default function ThemeToggle({ className = "" }) {
     if (savedTheme === "dark") {
       setIsDark(true);
       document.documentElement.classList.add("dark");
+      dispatch(setBasemap("dark"));
     } else if (savedTheme === "light") {
       setIsDark(false);
       document.documentElement.classList.remove("dark");
@@ -20,17 +24,19 @@ export default function ThemeToggle({ className = "" }) {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("theme", "light");
     }
-  }, []);
+  }, [dispatch]);
 
   const toggleTheme = () => {
     if (isDark) {
       document.documentElement.classList.remove("dark");
       localStorage.setItem("theme", "light");
       setIsDark(false);
+      dispatch(setBasemap("custom"));
     } else {
       document.documentElement.classList.add("dark");
       localStorage.setItem("theme", "dark");
       setIsDark(true);
+      dispatch(setBasemap("dark"));
     }
   };
 

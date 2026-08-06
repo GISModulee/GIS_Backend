@@ -16,13 +16,17 @@ export default function AddImageModal({ isOpen, onClose }) {
   const [preview, setPreview] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [abortController, setAbortController] = useState(null);
+  
   const { loadLayersFromBackend, chooseLayer, expandLayer, items } = useLayers();
   const activeCaseIdFromStore = useSelector((s) => s.auth.activeCaseId);
   const match = window.location.pathname.match(/\/map\/(\d+)/);
   const activeCaseId = match ? parseInt(match[1], 10) : activeCaseIdFromStore;
 
   const handleClose = () => {
-    if (loading) return;
+    if (loading && abortController) {
+      abortController.abort();
+    }
     setLayerName("");
     setNumPredictions(5);
     setSelectedFile(null);
@@ -41,6 +45,7 @@ export default function AddImageModal({ isOpen, onClose }) {
       setLayerName(nameWithoutExt);
     }
     if (file.type.startsWith("image/")) {
+      URL.revokeObjectURL(preview);
       setPreview(URL.createObjectURL(file));
     } else {
       setPreview("");
@@ -86,6 +91,9 @@ export default function AddImageModal({ isOpen, onClose }) {
     }
 
     setLoading(true);
+    const controller = new AbortController();
+    setAbortController(controller);
+
     const formData = new FormData();
     formData.append("file", selectedFile);
     formData.append("case_id", activeCaseId);
@@ -97,6 +105,7 @@ export default function AddImageModal({ isOpen, onClose }) {
 
       const response = await axiosInstance.post("/upload", formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        signal: controller.signal,
       });
 
       const result = response.data;
@@ -132,10 +141,15 @@ export default function AddImageModal({ isOpen, onClose }) {
       toast.success(result?.message || result?.detail || "Image uploaded successfully!");
       handleClose();
     } catch (err) {
-      console.error("Upload Error:", err);
-      toast.error(err.response?.data?.message || err.response?.data?.detail || err.message || "Upload failed");
+      if (err.name === "CanceledError" || axiosInstance.isCancel?.(err) || err.code === "ERR_CANCELED") {
+        toast.error("Upload canceled by user.");
+      } else {
+        console.error("Upload Error:", err);
+        toast.error(err.response?.data?.message || err.response?.data?.detail || err.message || "Upload failed");
+      }
     } finally {
       setLoading(false);
+      setAbortController(null);
     }
   };
 
@@ -156,8 +170,7 @@ export default function AddImageModal({ isOpen, onClose }) {
           </div>
           <button
             onClick={handleClose}
-            disabled={loading}
-            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition disabled:opacity-50"
+            className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition"
           >
             <X size={18} />
           </button>
@@ -188,8 +201,7 @@ export default function AddImageModal({ isOpen, onClose }) {
             <button
               type="button"
               onClick={handleClose}
-              disabled={loading}
-              className="px-4 py-2 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition disabled:opacity-50"
+              className="px-4 py-2 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
             >
               Cancel
             </button>

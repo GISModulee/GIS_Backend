@@ -10,6 +10,7 @@ export default function FeatureSelector({
   placeholder = "— select —",
   disabled = false,
   multiple = false,
+  allowedTypes,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const dispatch = useDispatch();
@@ -33,11 +34,14 @@ export default function FeatureSelector({
     }
   };
 
-  // Filter out Point, Circle, Polyline/Line features
+  // Filter based on allowedTypes or fallback default
   const filteredItems = items
     .map((lyr) => {
       const validFeatures = (lyr.features || []).filter((f) => {
         const type = (f.type || "").toLowerCase();
+        if (allowedTypes) {
+          return allowedTypes.includes(type);
+        }
         return (
           type !== "point" &&
           type !== "polyline" &&

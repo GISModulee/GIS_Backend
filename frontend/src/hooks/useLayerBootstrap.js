@@ -81,7 +81,7 @@ export function useLayerBootstrap() {
               let commentsList = [];
               try {
                 commentsList = await layerService.getComments(activeCaseId, f.feature_number);
-              } catch (_) {}
+              } catch (_) { }
 
               return {
                 localId: `local_feat_${f.id}`,
