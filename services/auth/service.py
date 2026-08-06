@@ -19,7 +19,7 @@ from utils.exceptions import (
 )
 
 
-def register_user(user, db):
+async def register_user(user, db):
     logger.info(f"Registration attempt | email={user.email} | role={user.role}")
 
     try:
@@ -69,7 +69,7 @@ def register_user(user, db):
     }
 
 
-def login_user(user, db):
+async def login_user(user, db):
     logger.info(f"Login attempt | email={user.email}")
 
     try:

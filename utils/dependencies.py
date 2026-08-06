@@ -16,7 +16,7 @@ from utils.logger import logger
 security = HTTPBearer(auto_error=False)
 
 
-def get_current_user(
+async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security)
 ):
     if credentials is None:
@@ -46,7 +46,7 @@ def get_current_user(
 
 def require_roles(allowed_roles: List[str]):
 
-    def checker(current_user=Depends(get_current_user)):
+    async def checker(current_user=Depends(get_current_user)):
 
         if current_user["role"] not in allowed_roles:
             logger.warning(

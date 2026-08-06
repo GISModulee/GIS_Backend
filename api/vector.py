@@ -30,40 +30,106 @@ router = APIRouter(
 
 
 @router.post("/union")
-def union(operation: VectorOperation, db: Session = Depends(get_db)):
-    return union_features(operation.case_id, operation.feature_numbers, db)
+async def union(
+    operation: VectorOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await union_features(
+        operation.case_id,
+        operation.feature_numbers,
+        db,
+        current_user["user_id"],
+        operation.layer_name,
+    )
 
 
 @router.post("/intersection")
-def intersection(operation: VectorOperation, db: Session = Depends(get_db)):
-    return intersection_features(operation.case_id, operation.feature_numbers, db)
+async def intersection(
+    operation: VectorOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await intersection_features(
+        operation.case_id,
+        operation.feature_numbers,
+        db,
+        current_user["user_id"],
+        operation.layer_name,
+    )
 
 
 @router.post("/difference")
-def difference(operation: VectorOperation, db: Session = Depends(get_db)):
-    return difference_features(operation.case_id, operation.feature_numbers, db)
+async def difference(
+    operation: VectorOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await difference_features(
+        operation.case_id,
+        operation.feature_numbers,
+        db,
+        current_user["user_id"],
+        operation.layer_name,
+    )
 
 
 @router.post("/symdifference")
-def symdifference(operation: VectorOperation, db: Session = Depends(get_db)):
-    return symdifference_features(operation.case_id, operation.feature_numbers, db)
+async def symdifference(
+    operation: VectorOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await symdifference_features(
+        operation.case_id,
+        operation.feature_numbers,
+        db,
+        current_user["user_id"],
+        operation.layer_name,
+    )
 
 
 @router.post("/buffer")
-def buffer(operation: BufferOperation, db: Session = Depends(get_db)):
-    return buffer_feature(
+async def buffer(
+    operation: BufferOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await buffer_feature(
         operation.case_id,
         operation.feature_number,
         operation.distance,
         db,
+        current_user["user_id"],
+        operation.layer_name,
     )
 
 
 @router.post("/centroid")
-def centroid(operation: CentroidOperation, db: Session = Depends(get_db)):
-    return centroid_feature(operation.case_id, operation.feature_number, db)
+async def centroid(
+    operation: CentroidOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await centroid_feature(
+        operation.case_id,
+        operation.feature_number,
+        db,
+        current_user["user_id"],
+        operation.layer_name,
+    )
 
 
 @router.post("/convex-hull")
-def convex(operation: ConvexHullOperation, db: Session = Depends(get_db)):
-    return convex_hull(operation.case_id, operation.feature_numbers, db)
+async def convex(
+    operation: ConvexHullOperation,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    return await convex_hull(
+        operation.case_id,
+        operation.feature_numbers,
+        db,
+        current_user["user_id"],
+        operation.layer_name,
+    )

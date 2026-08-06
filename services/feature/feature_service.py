@@ -3,10 +3,10 @@ import json
 from datetime import datetime
 
 from geoalchemy2 import Geography, Geometry
-from sqlalchemy import cast, func, select
+from sqlalchemy import cast, exists, func, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
-from models.model import Feature, Layer, Case
+from models.model import Comment, Feature, Layer, Case
 from schemas.feature_schema import FeatureCreate
 from utils.constants import (
     CASE_ID_REQUIRED,
@@ -41,11 +41,11 @@ from services.layer.layer_service import create_untitled_layer
 # HELPERS
 # ===================================================
 
-def _create_auto_layer(case_id: int, db):
-    return create_untitled_layer(case_id, db)
+async def _create_auto_layer(case_id: int, db):
+    return await create_untitled_layer(case_id, db)
 
 
-def _row_to_feature_dict(row):
+async def _row_to_feature_dict(row):
     try:
         geometry = json.loads(row.geometry) if row.geometry else None
     except (TypeError, ValueError) as e:
@@ -57,7 +57,6 @@ def _row_to_feature_dict(row):
         geometry_type = geometry["type"]
 
     return {
-        
         "id": row.id,
         "feature_number": row.feature_number,
         "case_id": row.case_id,
@@ -70,10 +69,22 @@ def _row_to_feature_dict(row):
         "created_by": row.created_by,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
+        "has_comments": bool(row.has_comments),
     }
 
 
-def _feature_select():
+async def _row_to_feature_summary_dict(row):
+    """Minimal feature representation for list views — only IDs, no geometry or metadata."""
+    return {
+        "id": row.id,
+        "feature_number": row.feature_number,
+        "case_id": row.case_id,
+        "layer_id": row.layer_id,
+        "has_comments": bool(row.has_comments),
+    }
+
+
+async def _feature_select():
     return select(
         Feature.id,
         Feature.feature_number,
@@ -87,10 +98,15 @@ def _feature_select():
         Feature.created_by,
         Feature.created_at,
         Feature.updated_at,
+        select(exists().where(
+            Comment.case_id == Feature.case_id,
+            Comment.layer_id == Feature.layer_id,
+            Comment.feature_number == Feature.feature_number,
+        )).scalar_subquery().label("has_comments"),
     )
 
 
-def _resolved_geometry_type(feature):
+async def _resolved_geometry_type(feature):
     """Use the actual GeoJSON type for points and lines only."""
     if feature.geometry_type == "Circle":
         return "Circle"
@@ -102,6 +118,104 @@ def _resolved_geometry_type(feature):
 
 
 # ===================================================
+# BATCH CREATE FEATURES (for bulk uploads — KML/GeoJSON imports)
+# ===================================================
+# Unlike create_feature() (one feature, one commit, used by the
+# single-feature POST /features route), this handles many features
+# in ONE transaction: one lock, one feature_number lookup, one
+# commit. Built for upload_service.py's KML/GeoJSON extractors.
+
+def create_features_batch(features: list, case_id: int, layer_id: int, db, created_by: int | None = None):
+    """
+    features: list of dicts, each with keys:
+        name, geometry (GeoJSON dict), geometry_type, properties
+    Circles aren't supported in this batch path (uploads don't produce
+    them) — only Polygon/LineString/Point geometries from parsed files.
+    """
+
+    logger.info(
+        f"Batch creating {len(features)} features | case_id={case_id} | layer_id={layer_id}"
+    )
+
+    if not features:
+        return []
+
+    try:
+        # Lock ONCE for the whole batch, not per-feature
+        db.execute(select(func.pg_advisory_xact_lock(case_id)))
+
+        layer = db.get(Layer, layer_id)
+        if layer is None:
+            raise NotFoundError(LAYER_NOT_FOUND)
+        if layer.case_id != case_id:
+            raise BadRequestError(FEATURE_LAYER_CASE_MISMATCH)
+
+        # ONE lookup for the starting number, then count up in Python
+        max_feature_number = db.scalar(
+            select(func.coalesce(func.max(Feature.feature_number), 0))
+            .where(Feature.case_id == case_id)
+        )
+
+        new_features = []
+        next_number = max_feature_number + 1
+
+        for f in features:
+            if not f.get("geometry"):
+                continue
+
+            geometry = func.ST_SetSRID(
+                func.ST_GeomFromGeoJSON(json.dumps(f["geometry"])),
+                4326
+            )
+
+            new_feature = Feature(
+                feature_number=next_number,
+                layer_id=layer_id,
+                case_id=case_id,
+                name=f.get("name"),
+                geom=geometry,
+                geometry_type=f.get("geometry_type", "Polygon"),
+                properties=f.get("properties", {}),
+                created_by=created_by,
+            )
+            new_features.append(new_feature)
+            next_number += 1
+
+        # ONE bulk add, ONE commit — not one per feature
+        db.add_all(new_features)
+        db.commit()
+
+        for f in new_features:
+            db.refresh(f)
+
+    except (NotFoundError, BadRequestError):
+        db.rollback()
+        raise
+
+    except IntegrityError as e:
+        db.rollback()
+        logger.error(f"Integrity error batch creating features | layer_id={layer_id} | error={e}", exc_info=True)
+        raise BadRequestError(FEATURE_CREATE_CONSTRAINT_FAILED) from e
+
+    except DataError as e:
+        db.rollback()
+        logger.error(f"Data error batch creating features | layer_id={layer_id} | error={e}", exc_info=True)
+        raise UnprocessableEntityError(FEATURE_INVALID_GEOMETRY) from e
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Unexpected DB error batch creating features | layer_id={layer_id} | error={e}", exc_info=True)
+        raise ServiceUnavailableError(FEATURE_CREATE_FAILED) from e
+
+    logger.info(f"Batch created {len(new_features)} features | case_id={case_id} | layer_id={layer_id}")
+
+    return [
+        {"feature_id": f.id, "feature_number": f.feature_number}
+        for f in new_features
+    ]
+
+
+# ===================================================
 # CREATE FEATURE
 # ===================================================
 # `created_by` is passed in explicitly by the caller (derived from
@@ -110,9 +224,9 @@ def _resolved_geometry_type(feature):
 # schema — see schemas/feature_schema.py for why FeatureCreate no
 # longer carries this field.
 
-def create_feature(feature, db, created_by: int | None = None):
+async def create_feature(feature, db, created_by: int | None = None):
 
-    geometry_type = _resolved_geometry_type(feature)
+    geometry_type = await _resolved_geometry_type(feature)
 
     logger.info(
         f"Creating feature | geometry_type={geometry_type} | "
@@ -133,7 +247,7 @@ def create_feature(feature, db, created_by: int | None = None):
     layer_id = feature.layer_id or None
 
     if layer_id is None:
-        layer_id = _create_auto_layer(case_id, db)
+        layer_id = await _create_auto_layer(case_id, db)
 
     # ---------------------------------
     # 3. VALIDATE GEOMETRY INPUT BEFORE HITTING THE DB
@@ -277,7 +391,7 @@ def create_feature(feature, db, created_by: int | None = None):
 # GET FEATURES OF A CASE
 # ===================================================
 
-def get_case_features(case_id, db):
+async def get_case_features(case_id, db):
 
     logger.info(
         f"Fetching features for case | case_id={case_id}"
@@ -297,7 +411,7 @@ def get_case_features(case_id, db):
             raise NotFoundError(CASE_NOT_FOUND)
 
         result = db.execute(
-            _feature_select()
+            (await _feature_select())
             .where(
                 Feature.case_id == case_id
             )
@@ -321,7 +435,7 @@ def get_case_features(case_id, db):
         ) from e
 
     return [
-        _row_to_feature_dict(row)
+        await _row_to_feature_dict(row)
         for row in rows
     ]
 
@@ -329,20 +443,51 @@ def get_case_features(case_id, db):
 # GET ALL FEATURES
 # ===================================================
 
-def get_features(db):
+async def get_features(db):
 
     logger.info("Fetching all features")
 
     try:
-        result = db.execute(_feature_select().order_by(Feature.id))
+        result = db.execute((await _feature_select()).order_by(Feature.id))
         rows = list(result)
 
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch features | error={e}", exc_info=True)
         raise ServiceUnavailableError(FEATURES_FETCH_FAILED) from e
 
-    return [_row_to_feature_dict(row) for row in rows]
+    return [await _row_to_feature_dict(row) for row in rows]
 
+# ===================================================
+# GET SINGLE FEATURE BY NUMBER (scoped to case + layer)
+# ===================================================
+
+async def get_feature_by_number(case_id, layer_id, feature_number, db):
+
+    logger.info(
+        f"Fetching feature by number | case_id={case_id} | layer_id={layer_id} | feature_number={feature_number}"
+    )
+
+    try:
+        row = db.execute(
+            (await _feature_select()).where(
+                Feature.case_id == case_id,
+                Feature.layer_id == layer_id,
+                Feature.feature_number == feature_number,
+            )
+        ).one_or_none()
+
+    except SQLAlchemyError as e:
+        logger.error(
+            f"Failed to fetch feature by number | case_id={case_id} | layer_id={layer_id} | "
+            f"feature_number={feature_number} | error={e}",
+            exc_info=True
+        )
+        raise ServiceUnavailableError(FEATURE_FETCH_FAILED) from e
+
+    if row is None:
+        return None
+
+    return await _row_to_feature_dict(row)
 
 # ===================================================
 # GET FEATURES OF A LAYER
@@ -351,8 +496,13 @@ def get_features(db):
 # A nonexistent layer_id returned an empty list `[]` — indistinguishable
 # from a real layer with zero features. Now verifies the layer exists
 # first and raises NotFoundError (404) if not.
+#
+# UPDATED: now returns a minimal summary (id, feature_number, case_id,
+# layer_id only) instead of the full feature dict — geometry and other
+# metadata are intentionally omitted from this list view. Use
+# get_feature_by_number() for full details on a single feature.
 
-def get_layer_features(layer_id, db):
+async def get_layer_features(layer_id, db):
 
     logger.info(f"Fetching features for layer | layer_id={layer_id}")
 
@@ -363,7 +513,7 @@ def get_layer_features(layer_id, db):
             raise NotFoundError(LAYER_NOT_FOUND)
 
         result = db.execute(
-            _feature_select().where(Feature.layer_id == layer_id).order_by(Feature.id)
+            (await _feature_select()).where(Feature.layer_id == layer_id).order_by(Feature.id)
         )
         rows = list(result)
 
@@ -374,20 +524,20 @@ def get_layer_features(layer_id, db):
         logger.error(f"Failed to fetch features for layer | layer_id={layer_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError(FEATURES_FETCH_FAILED) from e
 
-    return [_row_to_feature_dict(row) for row in rows]
+    return [await _row_to_feature_summary_dict(row) for row in rows]
 
 
 # ===================================================
 # GET SINGLE FEATURE
 # ===================================================
 
-def get_feature(feature_id, db):
+async def get_feature(feature_id, db):
 
     logger.info(f"Fetching feature | feature_id={feature_id}")
 
     try:
         row = db.execute(
-            _feature_select().where(Feature.id == feature_id)
+            (await _feature_select()).where(Feature.id == feature_id)
         ).one_or_none()
 
     except SQLAlchemyError as e:
@@ -397,14 +547,14 @@ def get_feature(feature_id, db):
     if row is None:
         return None
 
-    return _row_to_feature_dict(row)
+    return await _row_to_feature_dict(row)
 
 
 # ===================================================
 # UPDATE FEATURE
 # ===================================================
 
-def update_feature(feature_id, feature, db):
+async def update_feature(feature_id, feature, db):
 
     logger.info(f"Updating feature | feature_id={feature_id}")
 
@@ -418,7 +568,7 @@ def update_feature(feature_id, feature, db):
         existing.geom = func.ST_SetSRID(
             func.ST_GeomFromGeoJSON(json.dumps(feature.geometry)), 4326
         )
-        existing.geometry_type = _resolved_geometry_type(feature)
+        existing.geometry_type = await _resolved_geometry_type(feature)
         existing.properties = feature.properties
         existing.updated_at = datetime.now()
         db.commit()
@@ -453,7 +603,7 @@ def update_feature(feature_id, feature, db):
 # PATCH FEATURE
 # ===================================================
 
-def patch_feature(feature_id, feature, db):
+async def patch_feature(feature_id, feature, db):
 
     logger.info(f"Patching feature | feature_id={feature_id}")
 
@@ -492,7 +642,7 @@ def patch_feature(feature_id, feature, db):
 # DELETE FEATURE
 # ===================================================
 
-def delete_feature(feature_id, db):
+async def delete_feature(feature_id, db):
 
     logger.warning(f"Deleting feature | feature_id={feature_id}")
 

@@ -56,6 +56,19 @@ class FeatureResponse(BaseModel):
     created_by: int | None = None
     created_at: datetime
     updated_at: datetime | None = None
+    has_comments: bool = False
+
+
+# ===================================================
+# LIST LAYER FEATURES (summary view — no geometry/metadata)
+# ===================================================
+
+class FeatureSummaryResponse(BaseModel):
+    id: int
+    feature_number: int
+    case_id: int
+    layer_id: int | None = None
+    has_comments: bool = False
 
 
 class FeatureCreateResponse(BaseModel):

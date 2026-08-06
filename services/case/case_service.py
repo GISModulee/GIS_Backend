@@ -19,7 +19,7 @@ from utils.exceptions import (
 )
 
 
-def _case_dict(case: Case):
+async def _case_dict(case: Case):
     return {
         "id": case.id,
         "title": case.title,
@@ -31,7 +31,7 @@ def _case_dict(case: Case):
     }
 
 
-def create_case(case, db, created_by: int | None = None):
+async def create_case(case, db, created_by: int | None = None):
     logger.info(f"Creating case | title={case.title} | created_by={created_by}")
     try:
         new_case = Case(
@@ -53,27 +53,27 @@ def create_case(case, db, created_by: int | None = None):
     return {"success": True, "case_id": case_id, "message": "Case created successfully"}
 
 
-def get_cases(db):
+async def get_cases(db):
     logger.info("Fetching all cases")
     try:
         cases = db.scalars(select(Case).order_by(Case.created_at.desc())).all()
-        return [_case_dict(case) for case in cases]
+        return [await _case_dict(case) for case in cases]
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch cases | error={e}", exc_info=True)
         raise ServiceUnavailableError(CASES_FETCH_FAILED) from e
 
 
-def get_case(case_id, db):
+async def get_case(case_id, db):
     logger.info(f"Fetching case | case_id={case_id}")
     try:
         case = db.get(Case, case_id)
-        return _case_dict(case) if case else None
+        return await _case_dict(case) if case else None
     except SQLAlchemyError as e:
         logger.error(f"Failed to fetch case | case_id={case_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError(CASE_FETCH_FAILED) from e
 
 
-def update_case(case_id, case, db):
+async def update_case(case_id, case, db):
     logger.info(f"Updating case | case_id={case_id}")
     try:
         existing = db.get(Case, case_id)
@@ -94,7 +94,7 @@ def update_case(case_id, case, db):
     return {"success": True, "message": "Case updated successfully"}
 
 
-def patch_case(case_id, case, db):
+async def patch_case(case_id, case, db):
     updates = case.model_dump(exclude_none=True)
     if not updates:
         logger.info(f"Patch case skipped, no fields provided | case_id={case_id}")
@@ -118,7 +118,7 @@ def patch_case(case_id, case, db):
     return {"success": True, "message": "Case updated successfully"}
 
 
-def delete_case(case_id, db):
+async def delete_case(case_id, db):
     logger.warning(f"Deleting case | case_id={case_id}")
     try:
         existing = db.get(Case, case_id)

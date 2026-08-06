@@ -58,7 +58,7 @@ def _validate_top_k(top_k: int | None) -> int:
 
     return top_k
 
-def upload_image(
+async def upload_image(
     file: UploadFile,
     db: Session,
     case_id: int,
@@ -121,13 +121,14 @@ def upload_image(
     top_prediction = predictions[0]
 
     # --- 8. Create the layer via the shared layer_service ---
-    layer_result = create_layer({
+    layer_result = await create_layer({
         "case_id": case_id,
         "name": layer_name if layer_name else "__pending__",
         "layer_type": "geoclip_prediction",
         "visible": True,
     }, db)
     layer_id = layer_result["layer_id"]
+    
 
     if layer_name:
         resolved_layer_name = layer_name
@@ -138,6 +139,7 @@ def upload_image(
     # --- 9. Create one Feature per prediction via the shared feature_service ---
     file_id = str(uuid.uuid4())
     created_feature_ids = []
+    created_feature_numbers = []
 
     for rank, pred in enumerate(predictions, start=1):
 
@@ -171,8 +173,9 @@ def upload_image(
             },
         )
 
-        feature_result = create_feature(feature_in, db, created_by)
+        feature_result = await create_feature(feature_in, db, created_by)
         created_feature_ids.append(feature_result["feature_id"])
+        created_feature_numbers.append(feature_result["feature_number"])
 
     
     try:
@@ -219,6 +222,8 @@ def upload_image(
         "layer_name": resolved_layer_name,
         "filename": file.filename,
         "predictions_created": len(predictions),
+        "feature_ids": created_feature_ids,
+        "feature_numbers": created_feature_numbers,
         "data": result,
         "status": "success",
     }
@@ -260,7 +265,7 @@ def get_images_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> 
 # A nonexistent layer_id returned an empty FeatureCollection —
 # indistinguishable from a real layer with zero features. Now verifies
 # the layer exists first and raises NotFoundError (404) if not.
-def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> dict:
+async def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> dict:
 
     logger.info(f"Fetching features for layer | layer_id={layer_id} | limit={limit} | offset={offset}")
 
@@ -310,7 +315,7 @@ def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Session) -
 # ===================================================
 # GET SINGLE IMAGE (RAW BYTES)
 # ===================================================
-def get_image(image_id: str, db: Session) -> Response:
+async def get_image(image_id: str, db: Session) -> Response:
 
     logger.info(f"Fetching image | image_id={image_id}")
 
@@ -326,7 +331,7 @@ def get_image(image_id: str, db: Session) -> Response:
 # ===================================================
 # DELETE LAYER (+ CHILDREN)
 # ===================================================
-def delete_layer(layer_id: int, db: Session) -> dict:
+async def delete_layer(layer_id: int, db: Session) -> dict:
 
     logger.warning(f"Deleting GeoCLIP layer | layer_id={layer_id}")
 

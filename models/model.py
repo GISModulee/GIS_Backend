@@ -12,7 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
 from geoalchemy2 import Geography, Geometry
 
@@ -127,6 +127,8 @@ class Comment(Base):
         nullable=False
     )
 
+    feature_number = Column(Integer, nullable=False)
+
     case_id = Column(
         Integer,
         ForeignKey("cases.id", ondelete="CASCADE"),
@@ -137,6 +139,12 @@ class Comment(Base):
         Integer,
         ForeignKey("layers.id", ondelete="CASCADE"),
         nullable=False
+    )
+
+    parent_comment_id = Column(
+        Integer,
+        ForeignKey("comments.id", ondelete="CASCADE"),
+        nullable=True
     )
 
     user_id = Column(
@@ -154,6 +162,13 @@ class Comment(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     feature = relationship("Feature", back_populates="comments")
+
+    replies = relationship(
+        "Comment",
+        backref=backref("parent", remote_side=[id]),
+        cascade="all, delete-orphan",
+        single_parent=True,
+    )
 
 class ImageRecord(Base):
     __tablename__ = "image_records"

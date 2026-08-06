@@ -24,7 +24,7 @@ class CommentConnectionManager:
             len(self._connections[key]),
         )
  
-    def disconnect(self, case_id: int, feature_number: int, websocket: WebSocket) -> None:
+    async def disconnect(self, case_id: int, feature_number: int, websocket: WebSocket) -> None:
         key = (case_id, feature_number)
         connections = self._connections.get(key)
         if not connections:
@@ -57,7 +57,7 @@ class CommentConnectionManager:
                     feature_number,
                     type(result).__name__,
                 )
-                self.disconnect(case_id, feature_number, connection)
+                await self.disconnect(case_id, feature_number, connection)
  
  
 comment_connection_manager = CommentConnectionManager()

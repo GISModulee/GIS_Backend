@@ -25,29 +25,29 @@ router = APIRouter(prefix="/cases", tags=["Cases"])
 # CREATE CASE — Admin, Officer, Analyst
 # ===================================================
 @router.post("", response_model=CaseCreateResponse)
-def add_case(case: CaseCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
+async def add_case(case: CaseCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
     logger.info(f"POST /cases | user_id={current_user['user_id']} | role={current_user['role']} | body={case.model_dump()}")
-    return create_case(case, db, current_user["user_id"])
+    return await create_case(case, db, current_user["user_id"])
 
 
 # ===================================================
 # GET ALL CASES — any authenticated user
 # ===================================================
 @router.get("", response_model=list[CaseResponse])
-def list_cases(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def list_cases(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     logger.info(f"GET /cases | user_id={current_user['user_id']}")
-    return get_cases(db)
+    return await get_cases(db)
 
 
 # ===================================================
 # GET SINGLE CASE — any authenticated user
 # ===================================================
 @router.get("/{case_id}", response_model=CaseResponse)
-def get_single_case(case_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def get_single_case(case_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
 
     logger.info(f"GET /cases/{case_id} | user_id={current_user['user_id']}")
 
-    case = get_case(case_id, db)
+    case = await get_case(case_id, db)
 
     if case is None:
         logger.warning(f"Case not found | case_id={case_id}")
@@ -60,48 +60,48 @@ def get_single_case(case_id: int, db: Session = Depends(get_db), current_user=De
 # UPDATE CASE — Admin, Officer, Analyst
 # ===================================================
 @router.put("/{case_id}", response_model=CaseActionResponse)
-def edit_case(case_id: int, case: CaseCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
+async def edit_case(case_id: int, case: CaseCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
 
     logger.info(f"PUT /cases/{case_id} | user_id={current_user['user_id']} | role={current_user['role']}")
 
-    existing = get_case(case_id, db)
+    existing = await get_case(case_id, db)
 
     if existing is None:
         logger.warning(f"Case not found | case_id={case_id}")
         raise NotFoundError(CASE_NOT_FOUND)
 
-    return update_case(case_id, case, db)
+    return await update_case(case_id, case, db)
 
 
 # ===================================================
 # PATCH CASE — Admin, Officer, Analyst
 # ===================================================
 @router.patch("/{case_id}", response_model=CaseActionResponse)
-def edit_case_partial(case_id: int, case: CasePatch, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
+async def edit_case_partial(case_id: int, case: CasePatch, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
 
     logger.info(f"PATCH /cases/{case_id} | user_id={current_user['user_id']} | role={current_user['role']}")
 
-    existing = get_case(case_id, db)
+    existing = await get_case(case_id, db)
 
     if existing is None:
         logger.warning(f"Case not found | case_id={case_id}")
         raise NotFoundError(CASE_NOT_FOUND)
 
-    return patch_case(case_id, case, db)
+    return await patch_case(case_id, case, db)
 
 
 # ===================================================
 # DELETE CASE — Admin only
 # ===================================================
 @router.delete("/{case_id}", response_model=CaseActionResponse)
-def remove_case(case_id: int, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_DELETE_CASE))):
+async def remove_case(case_id: int, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_DELETE_CASE))):
 
     logger.warning(f"DELETE /cases/{case_id} | user_id={current_user['user_id']} | role={current_user['role']}")
 
-    existing = get_case(case_id, db)
+    existing = await get_case(case_id, db)
 
     if existing is None:
         logger.warning(f"Case not found | case_id={case_id}")
         raise NotFoundError(CASE_NOT_FOUND)
 
-    return delete_case(case_id, db)
+    return await delete_case(case_id, db)

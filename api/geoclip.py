@@ -28,7 +28,7 @@ router = APIRouter()
     response_model=ImageUploadResponse,
     summary="Upload image and create GeoCLIP layer",
 )
-def upload_image(
+async def upload_image(
     file: Annotated[UploadFile, File(...)],
     db: Annotated[Session, Depends(get_db)],
     case_id: Annotated[int, Form(...)],
@@ -46,7 +46,7 @@ def upload_image(
         f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | "
         f"case_id={case_id} | filename={file.filename} | top_k={top_k} | layer_name={layer_name}"
     )
-    return upload_image_service(
+    return await upload_image_service(
         file,
         db,
         case_id=case_id,
@@ -60,7 +60,7 @@ def upload_image(
     "/layers/{layer_id}/images",
     response_model=List[ImageResponse],
 )
-def get_images_by_layer(
+async def get_images_by_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(get_current_user),
@@ -72,14 +72,14 @@ def get_images_by_layer(
         f"GET /layers/{layer_id}/images | user_id={current_user['user_id']} | "
         f"limit={limit} | offset={offset}"
     )
-    return get_images_by_layer_service(layer_id, limit, offset, db)
+    return await get_images_by_layer_service(layer_id, limit, offset, db)
 
 
 @router.get(
     "/geoclip/layers/{layer_id}/features",
     response_model=FeatureCollectionResponse,
 )
-def get_features_by_layer(
+async def get_features_by_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(get_current_user),
@@ -90,27 +90,27 @@ def get_features_by_layer(
         f"GET /layers/{layer_id}/features | user_id={current_user['user_id']} | "
         f"limit={limit} | offset={offset}"
     )
-    return get_features_by_layer_service(layer_id, limit, offset, db)
+    return await get_features_by_layer_service(layer_id, limit, offset, db)
 
 
 @router.get("/image/{image_id}")
-def get_image(
+async def get_image(
     image_id: str,
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(get_current_user),
 ):
     logger.info(f"GET /image/{image_id} | user_id={current_user['user_id']}")
-    return get_image_service(image_id, db)
+    return await get_image_service(image_id, db)
 
 
 @router.delete(
     "/geoclip/layers/{layer_id}",
     response_model=LayerActionResponse,
 )
-def delete_layer(
+async def delete_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
     current_user=Depends(require_roles(CAN_DELETE_OPERATIONAL)),
 ):
     logger.warning(f"DELETE /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
-    return delete_layer_service(layer_id, db)
+    return await delete_layer_service(layer_id, db)

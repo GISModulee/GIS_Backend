@@ -7,13 +7,13 @@ import geopandas as gpd
 import rasterio
 
 from fastapi import UploadFile
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from starlette.concurrency import run_in_threadpool
 
+from models.model import Layer
 from schemas.feature_schema import FeatureCreate
-from services.feature.feature_service import create_feature
-from services.layer.layer_service import (
-    create_import_layer,
-    get_import_layer_by_hash,
-)
+from services.feature.feature_service import create_features_batch
 from utils.constants import (
     CASE_ID_REQUIRED,
     CSV_PARSE_FAILED_TEMPLATE,
@@ -24,11 +24,21 @@ from utils.constants import (
     JSON_OBJECT_EXPECTED,
     JSON_PARSE_FAILED_TEMPLATE,
     KML_PARSE_FAILED_TEMPLATE,
+    LAYER_CREATE_FAILED,
+    LAYER_DUPLICATE_NAME_TEMPLATE,
+    LAYER_DUPLICATE_SUFFIX_IMPORT,
     TIFF_READ_FAILED_TEMPLATE,
     UPLOAD_TYPE_UNSUPPORTED_TEMPLATE,
 )
 from utils.logger import logger
-from utils.exceptions import BadRequestError, NotImplementedError_, UnsupportedMediaTypeError, UnprocessableEntityError
+from utils.exceptions import (
+    BadRequestError,
+    ConflictError,
+    NotImplementedError_,
+    ServiceUnavailableError,
+    UnsupportedMediaTypeError,
+    UnprocessableEntityError,
+)
 
 
 # ===================================================
@@ -82,23 +92,78 @@ def _check_duplicate_import(case_id, file_hash, source_label, db):
     Returns the short-circuit response dict if this exact file was
     already imported into this case, else None.
     """
-    existing_layer = get_import_layer_by_hash(case_id, file_hash, db)
+    existing_layer = db.scalar(
+        select(Layer).where(
+            Layer.case_id == case_id,
+            Layer.file_hash == file_hash,
+            Layer.layer_type == "import",
+        ).limit(1)
+    )
 
     if not existing_layer:
         return None
 
     logger.info(
         f"Duplicate {source_label} import detected — reusing existing layer | "
-        f"case_id={case_id} | layer_id={existing_layer['id']} | file_hash={file_hash}"
+        f"case_id={case_id} | layer_id={existing_layer.id} | file_hash={file_hash}"
     )
     return {
         "success": True,
         "status": "already_imported",
-        "layer_id": existing_layer["id"],
-        "layer_name": existing_layer["name"],
+        "layer_id": existing_layer.id,
+        "layer_name": existing_layer.name,
         "imported_features": 0,
         "message": "This file was already imported into this case — no new layer created."
     }
+def _create_import_layer(case_id, name, file_hash, db):
+    try:
+        existing_id = db.scalar(
+            select(Layer.id).where(
+                Layer.case_id == case_id,
+                Layer.name == name,
+            ).limit(1)
+        )
+        if existing_id is not None:
+            raise ConflictError(
+                LAYER_DUPLICATE_NAME_TEMPLATE.format(
+                    name=name,
+                    suffix=LAYER_DUPLICATE_SUFFIX_IMPORT,
+                )
+            )
+
+        record = Layer(
+            case_id=case_id,
+            name=name,
+            layer_type="import",
+            visible=True,
+            file_hash=file_hash,
+        )
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return {
+            "success": True,
+            "layer_id": record.id,
+            "message": "Layer created successfully",
+        }
+
+    except ConflictError:
+        raise
+
+    except IntegrityError as e:
+        db.rollback()
+        raise ConflictError(
+            LAYER_DUPLICATE_NAME_TEMPLATE.format(
+                name=name,
+                suffix=LAYER_DUPLICATE_SUFFIX_IMPORT,
+            )
+        ) from e
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise ServiceUnavailableError(LAYER_CREATE_FAILED) from e
+
+
 def _resolve_layer_name(layer_name, filename):
     return layer_name if layer_name else os.path.splitext(filename)[0]
 
@@ -161,12 +226,22 @@ def remove_z_coordinates(geometry):
     return geometry
 
 
+# ===================================================
+# INGEST FEATURES (batched — one DB round-trip, not one per feature)
+# ===================================================
+# UPDATED: previously called create_feature() once per row inside the
+# loop (one lock + one commit per feature — very slow for large
+# files). Now collects every feature into a plain list first, then
+# hands the whole list to create_features_batch() which does ONE
+# advisory lock, ONE feature_number lookup, and ONE commit for the
+# entire file.
+
 def _ingest_features(case_id, layer_id, feature_iter, created_by, db):
     """
     feature_iter yields (name, geometry, properties) tuples for each
     feature to import. Returns the count of features imported.
     """
-    imported = 0
+    collected = []
 
     for name, geometry, properties in feature_iter:
 
@@ -175,20 +250,16 @@ def _ingest_features(case_id, layer_id, feature_iter, created_by, db):
 
         geometry = remove_z_coordinates(geometry)
 
-        feature = FeatureCreate(
-            case_id=case_id,
-            layer_id=layer_id,
-            name=name or f"Feature {imported + 1}",
-            geometry=geometry,
-            geometry_type=geometry["type"],
-            properties=properties,
-        )
+        collected.append({
+            "name": name or f"Feature {len(collected) + 1}",
+            "geometry": geometry,
+            "geometry_type": geometry["type"],
+            "properties": properties,
+        })
 
-        create_feature(feature, db, created_by)
+    result = create_features_batch(collected, case_id, layer_id, db, created_by)
 
-        imported += 1
-
-    return imported
+    return len(result)
 
 
 # ===================================================
@@ -245,7 +316,7 @@ class KMLExtractor(BaseExtractor):
 
         resolved_layer_name = _resolve_layer_name(layer_name, filename)
 
-        layer_response = create_import_layer(
+        layer_response = _create_import_layer(
             case_id=case_id,
             name=resolved_layer_name,
             file_hash=file_hash,
@@ -344,7 +415,7 @@ class GeoJSONExtractor(BaseExtractor):
 
         resolved_layer_name = _resolve_layer_name(layer_name, filename)
 
-        layer_response = create_import_layer(
+        layer_response = _create_import_layer(
             case_id=case_id,
             name=resolved_layer_name,
             file_hash=file_hash,
@@ -413,6 +484,11 @@ EXTRACTOR_REGISTRY = {
 # ===================================================
 # PROCESS UPLOADED FILE
 # ===================================================
+# UPDATED: extractor.extract() (which can now do heavy, blocking DB
+# work for thousands of features) is run via run_in_threadpool
+# instead of being called directly. Without this, a large upload
+# would block the whole FastAPI event loop — freezing the server for
+# every other user — while this one upload was processing.
 
 async def process_upload(
     case_id: int,
@@ -434,7 +510,8 @@ async def process_upload(
     if extractor is None:
         raise UnsupportedMediaTypeError(UPLOAD_TYPE_UNSUPPORTED_TEMPLATE.format(extension=extension))
 
-    data = extractor.extract(
+    data = await run_in_threadpool(
+        extractor.extract,
         file_path=file_path,
         filename=file.filename,
         case_id=case_id,

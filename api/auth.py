@@ -20,15 +20,15 @@ router = APIRouter(tags=["Authentication"])
 
 
 @router.post("/register", response_model=RegisterResponse)
-def register(user: RegisterUser, db: Session = Depends(get_db)):
+async def register(user: RegisterUser, db: Session = Depends(get_db)):
     logger.info(f"POST /register | email={user.email} | role={user.role}")
-    return register_user(user, db)
+    return await register_user(user, db)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(user: LoginUser, db: Session = Depends(get_db)):
+async def login(user: LoginUser, db: Session = Depends(get_db)):
     logger.info(f"POST /login | email={user.email}")
-    return login_user(user, db)
+    return await login_user(user, db)
 
 
 @router.get("/me", response_model=CurrentUserResponse)
