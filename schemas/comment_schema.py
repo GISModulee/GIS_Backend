@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -16,6 +17,7 @@ class CommentCreateResponse(BaseModel):
     layer_id: int
     feature_number: int
     message: str
+    comment: dict[str, Any]
 
 
 # ===================================================
@@ -30,6 +32,7 @@ class ReplyCreateResponse(BaseModel):
     layer_id: int
     feature_number: int
     message: str
+    comment: dict[str, Any]
 
 
 # ===================================================

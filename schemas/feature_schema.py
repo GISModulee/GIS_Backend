@@ -39,8 +39,9 @@ class FeatureCreate(BaseModel):
 # ===================================================
 
 class FeaturePatch(BaseModel):
-    name: Optional[str] = None
-    properties: Optional[Dict[str, Any]] = None
+    name: str | None = None
+    properties: dict | None = None
+    layer_id: int | None = None
 
 
 class FeatureResponse(BaseModel):

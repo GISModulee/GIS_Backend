@@ -52,10 +52,11 @@ class CommentConnectionManager:
         for connection, result in zip(connections, deliveries):
             if isinstance(result, Exception):
                 logger.warning(
-                    "Comment WebSocket delivery failed | case_id=%s | feature_number=%s | error=%s",
+                    "Comment WebSocket delivery failed | case_id=%s | feature_number=%s | error=%s | message=%s",
                     case_id,
                     feature_number,
                     type(result).__name__,
+                    str(result),
                 )
                 await self.disconnect(case_id, feature_number, connection)
  

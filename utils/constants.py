@@ -164,7 +164,7 @@ GEO_SEARCH_FEATURE_EMPTY_SHAPE = "Selected feature has an empty geometry"
 GEO_SEARCH_FEATURE_BOUNDS_INVALID = (
     "Selected feature geometry is outside valid longitude/latitude bounds"
 )
-GEO_SEARCH_AREA_TOO_LARGE = " Search area too large."
+GEO_SEARCH_AREA_TOO_LARGE = " Search area is too large."
 GEO_SEARCH_TIMEOUT = (
     "News search timed out before results could be retrieved. Please try again."
 )

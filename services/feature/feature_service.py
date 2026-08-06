@@ -609,25 +609,71 @@ async def patch_feature(feature_id, feature, db):
 
     try:
         existing = db.get(Feature, feature_id)
+
         if existing is None:
             logger.warning(f"Patch feature failed: not found | feature_id={feature_id}")
             raise NotFoundError(FEATURE_NOT_FOUND)
 
+        # ===================================================
+        # MOVE FEATURE TO ANOTHER LAYER (OPTIONAL)
+        # ===================================================
+        if feature.layer_id is not None:
+
+            destination_layer = db.get(Layer, feature.layer_id)
+
+            if destination_layer is None:
+                logger.warning(
+                    f"Patch feature failed: destination layer not found | "
+                    f"layer_id={feature.layer_id}"
+                )
+                raise NotFoundError(LAYER_NOT_FOUND)
+
+            if destination_layer.case_id != existing.case_id:
+                logger.warning(
+                    f"Patch feature failed: destination layer belongs to different case | "
+                    f"feature_id={feature_id} | "
+                    f"feature_case={existing.case_id} | "
+                    f"layer_case={destination_layer.case_id}"
+                )
+                raise BadRequestError(
+                    "Destination layer does not belong to the same case"
+                )
+
+            existing.layer_id = feature.layer_id
+
+        # ===================================================
+        # RENAME FEATURE (OPTIONAL)
+        # ===================================================
         if feature.name is not None:
             existing.name = feature.name
+
+        # ===================================================
+        # UPDATE FEATURE PROPERTIES (OPTIONAL)
+        # ===================================================
         properties = dict(existing.properties or {})
+
         if feature.properties is not None:
             properties.update(feature.properties)
+
         existing.properties = properties
+
         existing.updated_at = datetime.now()
+
         db.commit()
 
     except NotFoundError:
         raise
 
+    except BadRequestError:
+        raise
+
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Unexpected DB error patching feature | feature_id={feature_id} | error={e}", exc_info=True)
+        logger.error(
+            f"Unexpected DB error patching feature | "
+            f"feature_id={feature_id} | error={e}",
+            exc_info=True
+        )
         raise ServiceUnavailableError(FEATURE_UPDATE_FAILED) from e
 
     logger.info(f"Feature patched | feature_id={feature_id}")

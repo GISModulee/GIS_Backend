@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Form, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
  
@@ -24,6 +25,7 @@ from utils.constants import WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.auth_utils import decode_access_token
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_COMMENT
+from utils.exceptions import NotFoundError
 from utils.logger import logger
  
 router = APIRouter(
@@ -58,13 +60,15 @@ async def add_comment(
     await comment_connection_manager.broadcast(
         case_id,
         feature_number,
-        {
-            "event": "comment.created",
-            "case_id": case_id,
-            "layer_id": layer_id,
-            "feature_number": feature_number,
-            "comment_id": result["comment_id"],
-        },
+        jsonable_encoder(
+            {
+                "event": "comment.created",
+                "case_id": case_id,
+                "layer_id": layer_id,
+                "feature_number": feature_number,
+                "comment": result["comment"],
+            }
+        ),
     )
     return result
 
@@ -103,14 +107,16 @@ async def add_reply(
     await comment_connection_manager.broadcast(
         case_id,
         feature_number,
-        {
-            "event": "comment.reply_created",
-            "case_id": case_id,
-            "layer_id": layer_id,
-            "feature_number": feature_number,
-            "parent_comment_id": parent_comment_id,
-            "comment_id": result["comment_id"],
-        },
+        jsonable_encoder(
+            {
+                "event": "comment.reply_created",
+                "case_id": case_id,
+                "layer_id": layer_id,
+                "feature_number": feature_number,
+                "parent_comment_id": parent_comment_id,
+                "comment": result["comment"],
+            }
+        ),
     )
     return result
 
@@ -181,14 +187,57 @@ def fetch_comment_attachment(
  
     return get_comment_attachment(case_id, layer_id, feature_number, comment_id, db)
  
+# ===================================================
+# GET COMMENTS OF A CASE
+# ===================================================
+ 
+@router.get("/cases/{case_id}/comments", response_model=list[CommentResponse])
+def list_case_comments(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+ 
+    logger.info(
+        f"GET /cases/{case_id}/comments | user_id={current_user['user_id']}"
+    )
+ 
+    return get_case_comments(case_id, db)
 
 
+# ===================================================
+# GET COMMENTS OF A LAYER
+# ===================================================
 
+@router.get("/cases/{case_id}/layers/{layer_id}/comments", response_model=list[CommentResponse])
+def list_layer_comments(
+    case_id: int,
+    layer_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+
+    logger.info(
+        f"GET /cases/{case_id}/layers/{layer_id}/comments | user_id={current_user['user_id']}"
+    )
+
+    return get_layer_comments(case_id, layer_id, db)
  
  
 @router.websocket("/ws/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments")
-async def feature_comment_updates(websocket: WebSocket, case_id: int, layer_id: int, feature_number: int):
-    """Push comment-created notifications to authenticated feature subscribers."""
+async def feature_comment_updates(
+    websocket: WebSocket,
+    case_id: int,
+    layer_id: int,
+    feature_number: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Authenticates the subscriber, sends the full comment thread once on
+    connect (thread.initial), then pushes live comment.created and
+    comment.reply_created events as they happen — no REST re-fetch
+    needed after the initial connection.
+    """
     token = websocket.query_params.get("token")
     payload = decode_access_token(token) if token else None
     if not payload or payload.get("user_id") is None or payload.get("sub") is None:
@@ -203,17 +252,43 @@ async def feature_comment_updates(websocket: WebSocket, case_id: int, layer_id: 
  
     await comment_connection_manager.connect(case_id, feature_number, websocket)
     try:
+        # get_feature_comment_thread is sync (regular blocking SQLAlchemy
+        # calls) — run it in a threadpool so this async WebSocket handler
+        # doesn't block the event loop while the query runs.
+        try:
+            comments = await run_in_threadpool(
+                get_feature_comment_thread,
+                case_id,
+                layer_id,
+                feature_number,
+                db,
+            )
+        except NotFoundError as exc:
+            logger.warning(
+                "Comment WebSocket thread fetch failed | case_id=%s | layer_id=%s | feature_number=%s | error=%s",
+                case_id,
+                layer_id,
+                feature_number,
+                type(exc).__name__,
+            )
+            await websocket.close(code=WEBSOCKET_POLICY_VIOLATION, reason=str(exc))
+            return
+
         await websocket.send_json(
-            {
-                "event": "connection.ready",
-                "case_id": case_id,
-                "layer_id": layer_id,
-                "feature_number": feature_number,
-            }
+            jsonable_encoder(
+                {
+                    "event": "thread.initial",
+                    "case_id": case_id,
+                    "layer_id": layer_id,
+                    "feature_number": feature_number,
+                    "comments": comments,
+                }
+            )
         )
         while True:
             # Receiving keeps disconnect detection active. Comment creation
-            # remains on the existing authenticated REST endpoint.
+            # remains on the existing authenticated REST endpoints, which
+            # broadcast full comment objects back over this connection.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
@@ -226,4 +301,4 @@ async def feature_comment_updates(websocket: WebSocket, case_id: int, layer_id: 
             type(exc).__name__,
         )
     finally:
-        comment_connection_manager.disconnect(case_id, feature_number, websocket)
+        await comment_connection_manager.disconnect(case_id, feature_number, websocket)

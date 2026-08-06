@@ -102,7 +102,30 @@ def create_comment(case_id, layer_id, feature_number, user_id, comment, attachme
             )
             db.add(new_comment)
             db.flush()
+            db.refresh(new_comment)
+
+            # Fetch the author's display info now, while the session is
+            # still open — needed to build the full comment object below.
+            user = db.get(User, user_id)
+
             comment_id = new_comment.id
+            full_comment = {
+                "id": new_comment.id,
+                "parent_comment_id": None,
+                "case_id": new_comment.case_id,
+                "layer_id": new_comment.layer_id,
+                "feature_number": new_comment.feature_number,
+                "user_id": new_comment.user_id,
+                "user_full_name": user.full_name if user else None,
+                "user_username": user.username if user else None,
+                "user_role": user.role if user else None,
+                "comment": new_comment.comment,
+                "has_attachment": new_comment.attachment_filename is not None,
+                "attachment_filename": new_comment.attachment_filename,
+                "attachment_content_type": new_comment.attachment_content_type,
+                "created_at": new_comment.created_at,
+                "replies": [],
+            }
 
     except NotFoundError:
         raise
@@ -124,7 +147,8 @@ def create_comment(case_id, layer_id, feature_number, user_id, comment, attachme
         "case_id": case_id,
         "layer_id": layer_id,
         "feature_number": feature_number,
-        "message": "Comment added successfully"
+        "message": "Comment added successfully",
+        "comment": full_comment,
     }
 
 
@@ -213,7 +237,28 @@ def create_reply(case_id, layer_id, feature_number, parent_comment_id, user_id, 
             )
             db.add(new_reply)
             db.flush()
+            db.refresh(new_reply)
+
+            user = db.get(User, user_id)
+
             reply_id = new_reply.id
+            full_comment = {
+                "id": new_reply.id,
+                "parent_comment_id": new_reply.parent_comment_id,
+                "case_id": new_reply.case_id,
+                "layer_id": new_reply.layer_id,
+                "feature_number": new_reply.feature_number,
+                "user_id": new_reply.user_id,
+                "user_full_name": user.full_name if user else None,
+                "user_username": user.username if user else None,
+                "user_role": user.role if user else None,
+                "comment": new_reply.comment,
+                "has_attachment": new_reply.attachment_filename is not None,
+                "attachment_filename": new_reply.attachment_filename,
+                "attachment_content_type": new_reply.attachment_content_type,
+                "created_at": new_reply.created_at,
+                "replies": [],
+            }
 
     except NotFoundError:
         raise
@@ -237,7 +282,8 @@ def create_reply(case_id, layer_id, feature_number, parent_comment_id, user_id, 
         "case_id": case_id,
         "layer_id": layer_id,
         "feature_number": feature_number,
-        "message": "Reply added successfully"
+        "message": "Reply added successfully",
+        "comment": full_comment,
     }
 
 
