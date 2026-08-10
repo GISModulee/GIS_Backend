@@ -55,7 +55,7 @@ const Header = ({ onToggleSidebar }) => {
   }, [activeCaseId, cases]);
 
   return (
-    <header className="w-full h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-4 gap-4 shadow-sm">
+    <header className="relative z-[1020] w-full h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-4 gap-4 shadow-sm">
       {/* Left — Hamburger + Project Title */}
       <div className="flex items-center gap-3 min-w-[200px]">
         <IconButton

@@ -70,7 +70,7 @@ export default function Dashboard() {
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900 transition-colors">
         {/* Top Navbar */}
-        <header className="h-14 border-b border-gray-200 dark:border-gray-800 px-6 flex items-center justify-between flex-shrink-0">
+        <header className="relative z-[1020] h-14 border-b border-gray-200 dark:border-gray-800 px-6 flex items-center justify-between flex-shrink-0">
           <h2 className="text-lg font-bold text-gray-900 dark:text-white capitalize">{activeTab}</h2>
 
           {/* Filters and Search */}

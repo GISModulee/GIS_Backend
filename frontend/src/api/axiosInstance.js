@@ -61,11 +61,17 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    // If the backend has a connection error or timeout, do not force-log out the user.
-    // Wiping local storage on a transient network overload is highly disruptive.
+    // If the backend has a connection error or timeout, redirect to login page.
     if (!err.response) {
       if (import.meta.env.DEV) {
         console.error("[API Network Error]:", err);
+      }
+      if (window.location.pathname !== "/login") {
+        const theme = localStorage.getItem("theme");
+        localStorage.clear();
+        if (theme) localStorage.setItem("theme", theme);
+        sessionStorage.setItem("network_error_toast", "true");
+        window.location.href = "/login";
       }
       return Promise.reject(err);
     }
