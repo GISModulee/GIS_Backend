@@ -1,5 +1,6 @@
 import axios from "axios";
 import { API_URLS, API_CONFIG } from "@/config/apiConfig.js";
+import toast from "react-hot-toast";
 
 const axiosInstance = axios.create({
   // timeout: API_CONFIG.TIMEOUT,
@@ -61,17 +62,19 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    // If the backend has a connection error or timeout, redirect to login page.
+    // If the backend has a connection error or timeout, redirect to login and show Network Error toast
     if (!err.response) {
       if (import.meta.env.DEV) {
         console.error("[API Network Error]:", err);
       }
+      
       if (window.location.pathname !== "/login") {
+        sessionStorage.setItem("network_error_toast", "true");
         const theme = localStorage.getItem("theme");
         localStorage.clear();
         if (theme) localStorage.setItem("theme", theme);
-        sessionStorage.setItem("network_error_toast", "true");
         window.location.href = "/login";
+        return new Promise(() => {}); // Suspend promise to prevent local catch blocks from showing duplicate toasts
       }
       return Promise.reject(err);
     }
@@ -87,11 +90,17 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    // If we get a 404 or 503 error, use detail/message without appending request_id to user-facing details
-    if (err.response?.status === 404 || err.response?.status === 503) {
-      const errorData = err.response?.data;
-      const detail = errorData?.detail || errorData?.message || "Server Error";
-      err.message = detail;
+    // Extract and format backend-returned error messages for user feedback
+    if (err.response) {
+      const errorData = err.response.data;
+      const detail = errorData?.detail || errorData?.message || errorData?.error || null;
+      if (detail) {
+        if (Array.isArray(detail)) {
+          err.message = detail.map(d => `${d.loc ? d.loc.join('.') + ': ' : ''}${d.msg || JSON.stringify(d)}`).join(', ');
+        } else {
+          err.message = typeof detail === 'object' ? JSON.stringify(detail) : detail;
+        }
+      }
     }
 
     if (import.meta.env.DEV) {

@@ -59,11 +59,15 @@ export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZ
   };
 
   return (
-    <div className="flex items-center gap-1 bg-white/90 dark:bg-gray-900/90 backdrop-blur rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 px-2 py-2">
+    <div 
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      className="flex items-center gap-1 bg-white/90 dark:bg-gray-900/90 backdrop-blur rounded-2xl shadow-lg border border-gray-100 dark:border-gray-800 px-2 py-2"
+    >
       <div className="relative">
         <IconButton
           label="Select"
-          active={selectActive}
+          active={openDropdown ? openDropdown === "select" : selectActive}
           onClick={() => {
             pick("select");
             toggleDropdown("select");
@@ -83,7 +87,7 @@ export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZ
       <div className="relative">
         <IconButton
           label="Draw"
-          active={drawActive}
+          active={openDropdown ? openDropdown === "draw" : drawActive}
           onClick={() => toggleDropdown("draw")}
         >
           <Pencil size={16} />
@@ -113,8 +117,12 @@ export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZ
       </IconButton> */}
       <IconButton
         label="Comment"
-        active={activeTool === "comment"}
+        active={openDropdown ? false : activeTool === "comment"}
         onClick={() => {
+          if (activeTool === "comment") {
+            pick("select");
+            return;
+          }
           if (selectedFeatureId) {
             const allFeatures = items.flatMap((l) => l.features || []);
             const feature = allFeatures.find(
@@ -139,7 +147,7 @@ export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZ
 
       <IconButton
         label="Measure"
-        active={activeTool === "measure"}
+        active={openDropdown ? false : activeTool === "measure"}
         onClick={() => pick(activeTool === "measure" ? "select" : "measure")}
       >
         <Ruler size={16} />

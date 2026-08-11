@@ -11,6 +11,7 @@ import DrawingManager from "../drawingManager/DrawingManager.jsx";
 import { useLayers } from "../../hooks/useLayers.js";
 import CommentModal from "../commentModal/CommentModal.jsx";
 import DeleteConfirmModal from "../deleteConfirmModal/DeleteConfirmModal.jsx";
+import FeatureWebSocket from "../featureWebSocket/FeatureWebSocket.jsx";
 import { useNavigate, useParams } from "react-router-dom";
 import { setActiveCase } from "../../state/authSlice.js";
 
@@ -124,6 +125,7 @@ export default function MapWorkspace() {
       <ModalController />
       <CommentModal />
       <DeleteConfirmModal />
+      <FeatureWebSocket caseId={caseId} />
     </div>
   );
 }

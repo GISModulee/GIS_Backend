@@ -123,7 +123,23 @@ const layersSlice = createSlice({
       state.items.push(layer);
       state.selectedLayerId = layer.localId;
     },
-
+    addLayerFromBackend(state, action) {
+      const layerData = action.payload;
+      const localId = `local_${layerData.backendId}`;
+      if (state.items.some((l) => l.localId === localId)) return;
+      state.items.push({
+        localId,
+        backendId: layerData.backendId,
+        status: "saved",
+        name: layerData.name || `Layer ${layerData.backendId}`,
+        type: layerData.type || "group",
+        visible: layerData.visible ?? true,
+        color: layerData.color || "#2563eb",
+        features: [],
+        expanded: true,
+        error: null,
+      });
+    },
     updateLayer(state, action) {
       const { localId, changes } = action.payload;
       const layer = state.items.find((l) => l.localId === localId);
@@ -312,7 +328,7 @@ const layersSlice = createSlice({
 export const {
   hydrateFromBackend,
   setLayerBackendId, setFeatureBackendId, setFeatureHasComments,
-  addLayer, updateLayer, deleteLayer,
+  addLayer, addLayerFromBackend, updateLayer, deleteLayer,
   toggleLayerVisible, toggleLayerExpanded, selectLayer, selectFeature, setHoveredFeatureId,
   addFeature, updateFeature, deleteFeature,
   toggleFeatureVisible, moveFeature,
@@ -323,4 +339,4 @@ export const {
   openDeleteConfirm, closeDeleteConfirm,
 } = layersSlice.actions;
 
-export default layersSlice.reducer;
+export default layersSlice.reducer;

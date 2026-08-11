@@ -7,7 +7,9 @@ import { MAP_PROVIDERS, DEFAULT_BASEMAP } from "@/config/apiConfig.js";
 import BoundaryLayer from "@/components/boundaryLayer/BoundaryLayer.jsx";
 import MapController from "@/components/mapController/MapController.jsx";
 import DrawingManager from "@/components/drawingManager/DrawingManager.jsx";
-import LayerRenderer from "@/components/layerRenderer/LayerRenderer.jsx";
+import LayerRenderer from "../layerRenderer/LayerRenderer.jsx";
+import CursorWebSocket from "../cursorWebSocket/CursorWebSocket.jsx";
+import { useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import L from "leaflet";
 
@@ -113,6 +115,7 @@ const indiaBounds = [
 ];
 
 export default function MapView({ sidebarOpen }) {
+  const { caseId } = useParams();
   const resultLayers = useSelector((s) => s.layers.resultLayers) || [];
   const [attribution, setAttribution] = useState(null);
 
@@ -137,6 +140,7 @@ export default function MapView({ sidebarOpen }) {
         <AttributionInjector attribution={attribution} />
         <DrawingManager />
         <LayerRenderer />
+        <CursorWebSocket caseId={caseId} />
 
         {/* Render computed results layers from Turf */}
         {resultLayers

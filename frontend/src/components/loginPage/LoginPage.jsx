@@ -20,7 +20,7 @@ export default function LoginPage() {
     useEffect(() => {
         dispatch(logout());
         if (sessionStorage.getItem("network_error_toast") === "true") {
-            toast.error("Network Error");
+            toast.error("Network Error", { id: "network-error" });
             sessionStorage.removeItem("network_error_toast");
         }
     }, [dispatch]);
