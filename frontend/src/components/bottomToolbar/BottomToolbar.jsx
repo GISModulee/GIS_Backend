@@ -129,11 +129,7 @@ export default function BottomToolbar({ activeTool, setActiveTool, onZoomIn, onZ
               (f) => f.backendId === selectedFeatureId || f.localId === selectedFeatureId
             );
             if (feature) {
-              if (feature.backendId) {
-                dispatch(openCommentModal(feature.backendId));
-              } else {
-                toast.error("Save this feature first before adding a comment.");
-              }
+              dispatch(openCommentModal(feature.backendId || feature.localId));
               return;
             }
           }

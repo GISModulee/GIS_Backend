@@ -67,17 +67,7 @@ export default function UploadData() {
       return;
     }
 
-    // Check if already uploaded
-    const uploadedKey = `uploaded_files_${activeCaseId}`;
-    const uploadedList = JSON.parse(localStorage.getItem(uploadedKey) || "[]");
-    const isAlreadyUploaded = uploadedList.some(
-      (f) => f.name === selectedFile.name && f.size === selectedFile.size
-    );
 
-    if (isAlreadyUploaded) {
-      toast.error("already uploaded");
-      return;
-    }
 
     const resolvedName = layerName.trim() || selectedFile.name;
     const normalizedName = resolvedName.toLowerCase().trim();
@@ -121,13 +111,7 @@ export default function UploadData() {
 
       await loadLayersFromBackend();
 
-      // Record successfully uploaded file
-      const uploadedKey = `uploaded_files_${activeCaseId}`;
-      const uploadedList = JSON.parse(localStorage.getItem(uploadedKey) || "[]");
-      if (!uploadedList.some((f) => f.name === selectedFile.name && f.size === selectedFile.size)) {
-        uploadedList.push({ name: selectedFile.name, size: selectedFile.size });
-        localStorage.setItem(uploadedKey, JSON.stringify(uploadedList));
-      }
+
 
       toast.success(result?.message || result?.detail || "Data uploaded and saved successfully!");
       setLayerName("");

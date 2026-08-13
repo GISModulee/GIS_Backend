@@ -122,6 +122,7 @@ export default function MapView({ sidebarOpen }) {
   return (
     <div className="w-full h-full">
       <MapContainer
+        preferCanvas={true}
         center={[22.9, 78.9]}
         zoom={5}
         zoomControl={false}

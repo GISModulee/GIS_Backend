@@ -35,6 +35,7 @@ export default function LayerRow({ layer }) {
   const [editing, setEditing] = useState(false);
   const [nameVal, setNameVal] = useState(layer.name);
   const [dragOver, setDragOver] = useState(false);
+  const [limit, setLimit] = useState(100);
 
   const isSelected = selectedLayerId === layer.localId;
 
@@ -218,9 +219,25 @@ export default function LayerRow({ layer }) {
       {/* Features list */}
       {layer.expanded && layer.features.length > 0 && (
         <div className="pb-1 border-t border-gray-100 dark:border-gray-800">
-          {layer.features.map((feature) => (
+          {layer.features.slice(0, limit).map((feature) => (
             <FeatureRow key={feature.localId} feature={feature} layer={layer} />
           ))}
+          {layer.features.length > limit && (
+            <div className="flex flex-col items-center gap-1 py-2 border-t border-gray-50 dark:border-gray-800/50">
+              <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                Showing {limit} of {layer.features.length} features.
+              </span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setLimit((prev) => prev + 200);
+                }}
+                className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                Show More
+              </button>
+            </div>
+          )}
         </div>
       )}
 

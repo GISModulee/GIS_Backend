@@ -113,7 +113,6 @@ export default function CommentBubbleRenderer({ commentRefs, itemsRef, items, us
                     return;
                   }
 
-                  await layerService.getComments(caseId, layerId, featureNumber);
                   const rawComments = await layerService.getCommentsThread(caseId, layerId, featureNumber);
                   const updatedCommentsList = await Promise.all(
                     rawComments.map(async (c) => {

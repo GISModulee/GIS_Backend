@@ -40,29 +40,52 @@ export function useLayerBootstrap() {
 
         const isImagePredictionLayer = isGeoclipLayer || (layer.name && /\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(layer.name));
 
-        const features = [];
-        for (let index = 0; index < featuresList.length; index++) {
-          const rawItem = featuresList[index];
-          const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
-          const initialFeatureNumber =
-            toInt(rawItem.feature_number) ??
-            toInt(rawItem.properties?.feature_number) ??
-            toInt(rawItem.id) ??
-            (index + 1);
-
-          let f = rawItem;
-          // Skip per-feature detail fetch for geoclip layers — they use a different API path
-          if (!isGeoclipLayer) {
-            try {
-              const singleRes = await layerService.getSingleFeature(activeCaseId, layer.id, initialFeatureNumber);
-              if (singleRes && typeof singleRes === "object") {
-                f = { ...rawItem, ...singleRes };
-              }
-            } catch (err) {
-              console.warn(`[Bootstrap] Failed to fetch single feature ${initialFeatureNumber} for layer ${layer.id}:`, err);
+        const pLimit = async (items, concurrency, fn) => {
+          const results = [];
+          const executing = new Set();
+          for (const item of items) {
+            const p = Promise.resolve().then(() => fn(item));
+            results.push(p);
+            executing.add(p);
+            const clean = () => executing.delete(p);
+            p.then(clean, clean);
+            if (executing.size >= concurrency) {
+              await Promise.race(executing);
             }
           }
+          return Promise.all(results);
+        };
 
+        const resolvedFeatures = await pLimit(
+          featuresList.map((rawItem, index) => ({ rawItem, index })),
+          40,
+          async ({ rawItem, index }) => {
+            const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
+            const initialFeatureNumber =
+              toInt(rawItem.feature_number) ??
+              toInt(rawItem.properties?.feature_number) ??
+              toInt(rawItem.id) ??
+              (index + 1);
+
+            let f = rawItem;
+            // Skip per-feature detail fetch if geometry is already present or it's a geoclip layer
+            if (!isGeoclipLayer && !rawItem.geometry) {
+              try {
+                const singleRes = await layerService.getSingleFeature(activeCaseId, layer.id, initialFeatureNumber);
+                if (singleRes && typeof singleRes === "object") {
+                  f = { ...rawItem, ...singleRes };
+                }
+              } catch (err) {
+                console.warn(`[Bootstrap] Failed to fetch single feature ${initialFeatureNumber} for layer ${layer.id}:`, err);
+              }
+            }
+            return { rawItem, f, index, initialFeatureNumber };
+          }
+        );
+
+        const features = [];
+        for (const { rawItem, f, index, initialFeatureNumber } of resolvedFeatures) {
+          const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
           let geometry = f.geometry;
           if (typeof geometry === "string") {
             try {
@@ -124,9 +147,16 @@ export function useLayerBootstrap() {
             category: properties?.category ?? f.category ?? "",
             visible: isImagePredictionLayer ? (index < 5) : true,
             error: null,
-            commentsList: Array.isArray(f.comments) ? f.comments : (Array.isArray(f.commentsList) ? f.commentsList : []),
-            comments_count: typeof f.comments_count === "number" ? f.comments_count : (Array.isArray(f.comments) ? f.comments.length : 0),
-            hasComments: (typeof f.comments_count === "number" && f.comments_count > 0) || (Array.isArray(f.comments) && f.comments.length > 0) || (Array.isArray(f.commentsList) && f.commentsList.length > 0),
+            commentsList: [],
+            comments_count: 0,
+            hasComments:
+              rawItem.has_comments === true ||
+              rawItem.has_comments === 1 ||
+              rawItem.has_comments === "true" ||
+              (typeof rawItem.comments_count === "number" && rawItem.comments_count > 0) ||
+              (typeof rawItem.comments_count === "string" && parseInt(rawItem.comments_count, 10) > 0) ||
+              (Array.isArray(rawItem.comments) && rawItem.comments.length > 0) ||
+              (Array.isArray(rawItem.commentsList) && rawItem.commentsList.length > 0),
           });
         }
 

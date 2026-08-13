@@ -15,8 +15,7 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
 
 
-  // Initialize a single canvas renderer to group draw calls on the GPU
-  const canvasRenderer = useMemo(() => L.canvas({ padding: 0.5 }), []);
+
 
   useEffect(() => {
     if (!leafletMap) return;
@@ -24,14 +23,17 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
     items.forEach((layer) => {
       layer.features.forEach((feature) => {
         if (!feature.geometry) return;
-
-        const isCircleType = feature.geometry_type === "Circle" || feature.type === "circle";
+        const isCircleType = (feature.geometry_type === "Circle" || feature.type === "circle") && feature.geometry.type === "Point";
         if (!isCircleType) return;
 
-        const isFeatureSelected = selectedFeatureId && feature.backendId === selectedFeatureId;
+        const isFeatureSelected = selectedFeatureId && (
+          feature.backendId === selectedFeatureId ||
+          feature.localId === selectedFeatureId ||
+          (feature.backendId && Number(feature.backendId) === Number(selectedFeatureId))
+        );
         const isLayerSelected = selectedLayerId && layer.localId === selectedLayerId;
         const isSelected = isFeatureSelected || isLayerSelected;
-      
+
 
         const shouldShow = layer.visible && feature.visible;
 

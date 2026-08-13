@@ -26,7 +26,6 @@ export default function FeatureRow({ feature, layer, onDragStart }) {
     selectedFeatureId,
   } = useLayers();
   const isSelected = (feature.backendId && feature.backendId === selectedFeatureId) || (feature.localId === selectedFeatureId);
-  console.log("[FeatureRow] Rendering feature:", feature.name, "isSelected:", isSelected, "feature.backendId:", feature.backendId, "selectedFeatureId:", selectedFeatureId);
   const { mapInstance } = useMap();
   const [editing, setEditing] = useState(false);
   const [nameVal, setNameVal] = useState(feature.name);

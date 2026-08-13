@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { addFeature, updateFeature, deleteFeature, addLayerFromBackend } from "@/state/layersSlice.js";
+import { addFeature, updateFeature, deleteFeature, addLayerFromBackend, updateLayer, deleteLayer } from "@/state/layersSlice.js";
 import { API_URLS } from "@/config/apiConfig.js";
 import layerService from "@/utils/layerService.js";
 
@@ -61,9 +61,60 @@ export default function FeatureWebSocket({ caseId }) {
 
         try {
           const message = JSON.parse(event.data);
-          console.log("[FeatureWS] Received message:", message);
 
           if (message.event === "connection.ready") {
+            return;
+          }
+
+          if (message.event === "layer.created" && message.layer) {
+            dispatch(addLayerFromBackend({
+              backendId: message.layer.id,
+              name: message.layer.name,
+              type: message.layer.layer_type,
+              visible: message.layer.visible,
+              color: message.layer.color,
+            }));
+            return;
+          }
+
+          if (message.event === "layer.updated" && message.layer) {
+            const localId = `local_${message.layer.id}`;
+            const changes = {};
+            if (message.layer.name !== undefined) changes.name = message.layer.name;
+            if (message.layer.layer_type !== undefined) changes.type = message.layer.layer_type;
+            if (message.layer.visible !== undefined) changes.visible = message.layer.visible;
+            if (message.layer.color !== undefined) changes.color = message.layer.color;
+
+            dispatch(updateLayer({
+              localId,
+              changes,
+            }));
+            return;
+          }
+
+          if (message.event === "layer.deleted" && message.layer_id) {
+            dispatch(deleteLayer(`local_${message.layer_id}`));
+            return;
+          }
+
+          if (message.event === "feature.comment_created") {
+            const targetLayer = itemsRef.current.find(
+              (l) => Number(l.backendId) === Number(message.layer_id) || l.localId === `local_${message.layer_id}`
+            );
+            if (targetLayer) {
+              const targetFeature = (targetLayer.features || []).find(
+                (f) => Number(f.feature_number) === Number(message.feature_number)
+              );
+              if (targetFeature) {
+                dispatch(updateFeature({
+                  layerLocalId: targetLayer.localId,
+                  featureLocalId: targetFeature.localId,
+                  changes: {
+                    hasComments: true,
+                  }
+                }));
+              }
+            }
             return;
           }
 
@@ -72,7 +123,6 @@ export default function FeatureWebSocket({ caseId }) {
           if (!layerExists && message.layer_id) {
             try {
               const allLayers = await layerService.getAllForCase(message.case_id);
-              console.log("[FeatureWS] Fetched layers to find missing one:", allLayers);
               const backendLayer = allLayers.find((l) => l.id === message.layer_id);
               if (backendLayer) {
                 dispatch(addLayerFromBackend({
@@ -87,7 +137,6 @@ export default function FeatureWebSocket({ caseId }) {
               console.error("[FeatureWS] Failed to fetch new layer:", message.layer_id, err);
             }
           }
-          console.log("[DEBUG] Looking for layer:", layerLocalId, "Available layers:", itemsRef.current.map(l => l.localId));
           if (message.event === "feature.created" && message.feature) {
             const f = message.feature;
             const alreadyExists = itemsRef.current.some((layer) =>

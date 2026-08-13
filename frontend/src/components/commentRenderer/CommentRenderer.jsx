@@ -3,7 +3,6 @@ import { useLayers } from "@/hooks/useLayers.js";
 import CommentGlobalsHandler from "../commentGlobalsHandler/CommentGlobalsHandler.jsx";
 import CommentWebSocket from "../commentWebSocket/CommentWebSocket.jsx";
 import CommentBubbleRenderer from "../commentBubbleRenderer/CommentBubbleRenderer.jsx";
-import CommentSync from "../commentSync/CommentSync.jsx";
 
 export default function CommentRenderer({ commentRefs, itemsRef }) {
   const { items, loadLayersFromBackend } = useLayers();
@@ -32,9 +31,6 @@ export default function CommentRenderer({ commentRefs, itemsRef }) {
         itemsRef={itemsRef}
         items={items}
         user={user}
-      />
-      <CommentSync 
-        items={items} 
       />
     </>
   );

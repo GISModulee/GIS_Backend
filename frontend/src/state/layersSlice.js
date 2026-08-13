@@ -18,18 +18,42 @@ const makeLayer = ({ name, color = "#2563eb", type = "group", localId } = {}) =>
   error: null,
 });
 
-const makeFeature = ({ name, geometry, color, category, layerLocalId, type, localId }) => ({
-  localId: localId || tempId(),
-  backendId: null,
+const makeFeature = ({
+  name,
+  geometry,
+  color,
+  category,
   layerLocalId,
-  status: "local",
+  type,
+  localId,
+  backendId = null,
+  status = "local",
+  feature_number = null,
+  case_id = null,
+  layer_id = null,
+  commentsList = [],
+  comments_count = 0,
+  hasComments = false,
+  visible = true,
+  error = null,
+}) => ({
+  localId: localId || tempId(),
+  backendId,
+  layerLocalId,
+  status,
   name: name || "Untitled Feature",
   type,
   geometry,
   color: color || "#2563eb",
   category: category || "",
-  visible: true,
-  error: null,
+  visible,
+  error,
+  feature_number,
+  case_id,
+  layer_id,
+  commentsList,
+  comments_count,
+  hasComments,
 });
 
 const layersSlice = createSlice({
@@ -192,8 +216,23 @@ const layersSlice = createSlice({
 
     addFeature(state, action) {
       const { layerLocalId, featureData } = action.payload;
-      const layer = state.items.find((l) => l.localId === layerLocalId);
-      if (layer) layer.features.push(makeFeature({ ...featureData, layerLocalId }));
+      let layer = state.items.find((l) => l.localId === layerLocalId);
+      if (!layer) {
+        layer = {
+          localId: layerLocalId,
+          backendId: featureData.layer_id,
+          status: "saved",
+          name: `Layer ${featureData.layer_id}`,
+          type: "group",
+          visible: true,
+          color: "#2563eb",
+          features: [],
+          expanded: true,
+          error: null,
+        };
+        state.items.push(layer);
+      }
+      layer.features.push(makeFeature({ ...featureData, layerLocalId }));
     },
 
     updateFeature(state, action) {

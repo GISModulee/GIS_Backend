@@ -235,3 +235,26 @@ body,
 .feature-tooltip-popup .leaflet-popup-close-button:hover {
   color: #4b5563 !important;
 }
+
+/* Custom Marker Cluster Styling */
+.marker-cluster-custom {
+  background-color: rgba(220, 38, 38, 0.3) !important;
+  border-radius: 50%;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.marker-cluster-custom div {
+  width: 30px;
+  height: 30px;
+  background-color: rgba(220, 38, 38, 0.9) !important;
+  border-radius: 50%;
+  text-align: center;
+  color: white !important;
+  font-size: 13px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+}

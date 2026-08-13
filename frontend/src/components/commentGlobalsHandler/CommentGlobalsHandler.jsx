@@ -110,7 +110,6 @@ export default function CommentGlobalsHandler({ user, itemsRef, commentRefs }) {
         if (inputEl) inputEl.value = "";
         window.clearPopupFile(featureBackendId);
 
-        await layerService.getComments(caseId, layerId, featureNumber);
         const rawComments = await layerService.getCommentsThread(caseId, layerId, featureNumber);
         const updatedCommentsList = await Promise.all(
           rawComments.map(async (c) => {
