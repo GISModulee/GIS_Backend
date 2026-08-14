@@ -17,6 +17,10 @@ from services.geoclip.service import (
     get_images_by_layer as get_images_by_layer_service,
     upload_image as upload_image_service,
 )
+from services.feature.feature_service import get_feature
+from services.layer.layer_service import get_layer
+from services.layer.layer_websocket_manager import layer_connection_manager
+from services.feature.feature_websocket_manager import feature_connection_manager
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_UPLOAD, CAN_DELETE_OPERATIONAL
 from utils.logger import logger
@@ -46,7 +50,7 @@ async def upload_image(
         f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | "
         f"case_id={case_id} | filename={file.filename} | top_k={top_k} | layer_name={layer_name}"
     )
-    return await upload_image_service(
+    result = await upload_image_service(
         file,
         db,
         case_id=case_id,
@@ -54,6 +58,35 @@ async def upload_image(
         layer_name=layer_name,
         created_by=current_user["user_id"],
     )
+    if result.get("status") == "success" and result.get("layer_id") is not None:
+        created_layer = await get_layer(result["layer_id"], db)
+        message = {
+            "event": "layer.created",
+            "case_id": case_id,
+            "layer": created_layer,
+        }
+        await layer_connection_manager.broadcast(
+            case_id,
+            message,
+        )
+        await feature_connection_manager.broadcast(
+            case_id,
+            message,
+        )
+        for feature_id in result.get("feature_ids") or []:
+            created_feature = await get_feature(feature_id, db)
+            if created_feature is None:
+                continue
+            await feature_connection_manager.broadcast(
+                case_id,
+                {
+                    "event": "feature.created",
+                    "case_id": case_id,
+                    "layer_id": result["layer_id"],
+                    "feature": created_feature,
+                },
+            )
+    return result
 
 
 @router.get(
@@ -113,4 +146,22 @@ async def delete_layer(
     current_user=Depends(require_roles(CAN_DELETE_OPERATIONAL)),
 ):
     logger.warning(f"DELETE /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
-    return await delete_layer_service(layer_id, db)
+    existing_layer = await get_layer(layer_id, db)
+    result = await delete_layer_service(layer_id, db)
+
+    if existing_layer:
+        message = {
+            "event": "layer.deleted",
+            "case_id": existing_layer["case_id"],
+            "layer_id": layer_id,
+        }
+        await layer_connection_manager.broadcast(
+            existing_layer["case_id"],
+            message,
+        )
+        await feature_connection_manager.broadcast(
+            existing_layer["case_id"],
+            message,
+        )
+
+    return result

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from utils.constants import FEATURE_NOT_FOUND, LAYER_NOT_FOUND
+from utils.constants import FEATURE_NOT_FOUND, LAYER_NOT_FOUND, WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.logger import logger
 from utils.exceptions import NotFoundError
+from utils.auth_utils import decode_access_token
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_WRITE, CAN_DELETE_OPERATIONAL
 from schemas.feature_schema import (
@@ -20,14 +21,16 @@ from services.feature.feature_service import (
     create_feature,
     get_features,
     get_feature,
-    get_feature_by_number, 
+    get_feature_by_number,
     get_layer_features,
     get_case_features,
     update_feature,
     delete_feature,
     patch_feature
 )
+from services.feature.feature_websocket_manager import feature_connection_manager
 from services.layer.layer_service import get_layer
+from services.layer.layer_websocket_manager import layer_connection_manager
 
 router = APIRouter(tags=["Features"])
 
@@ -36,23 +39,53 @@ router = APIRouter(tags=["Features"])
 # CREATE FEATURE — Admin, Officer, Analyst
 # ===================================================
 @router.post("/features", response_model=FeatureCreateResponse)
-async def add_feature(feature: FeatureCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
+async def add_feature(
+    feature: FeatureCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(CAN_WRITE))
+):
+    logger.info(
+        f"POST /features | user_id={current_user['user_id']} "
+        f"| role={current_user['role']} "
+        f"| body={feature.model_dump()}"
+    )
 
-    logger.info(f"POST /features | user_id={current_user['user_id']} | role={current_user['role']} | body={feature.model_dump()}")
+    requested_layer_id = feature.layer_id
 
-    return await create_feature(feature, db, current_user["user_id"])
+    result = await create_feature(
+        feature,
+        db,
+        current_user["user_id"]
+    )
 
+    created_feature = await get_feature(
+        result["feature_id"],
+        db
+    )
 
-# ===================================================
-# GET ALL FEATURES — any authenticated user
-# ===================================================
-@router.get("/features", response_model=list[FeatureResponse])
-async def list_features(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    await feature_connection_manager.broadcast(
+        result["case_id"],
+        {
+            "event": "feature.created",
+            "case_id": result["case_id"],
+            "layer_id": result["layer_id"],
+            "feature": created_feature,
+        },
+    )
 
-    logger.info(f"GET /features | user_id={current_user['user_id']}")
+    if requested_layer_id is None:
+        created_layer = await get_layer(result["layer_id"], db)
+        layer_message = {
+            "event": "layer.created",
+            "case_id": result["case_id"],
+            "layer": created_layer,
+        }
+        await layer_connection_manager.broadcast(
+            result["case_id"],
+            layer_message,
+        )
 
-    return await get_features(db)
-
+    return result
 
 # ===================================================
 # UPDATE FEATURE (FULL) — Admin, Officer, Analyst
@@ -78,7 +111,21 @@ async def edit_feature(
     feature.case_id = case_id
     feature.layer_id = layer_id
 
-    return await update_feature(feature_id, feature, db)
+    result = await update_feature(feature_id, feature, db)
+
+    updated_feature = await get_feature(feature_id, db)
+
+    await feature_connection_manager.broadcast(
+        case_id,
+        {
+            "event": "feature.updated",
+            "case_id": case_id,
+            "layer_id": layer_id,
+            "feature": updated_feature,
+        },
+    )
+
+    return result
 
 
 # ===================================================
@@ -102,7 +149,21 @@ async def edit_feature_partial(
         logger.warning(f"Feature not found | case_id={case_id} | layer_id={layer_id} | feature_id={feature_id}")
         raise NotFoundError(FEATURE_NOT_FOUND)
 
-    return await patch_feature(feature_id, feature, db)
+    result = await patch_feature(feature_id, feature, db)
+
+    updated_feature = await get_feature(feature_id, db)
+
+    await feature_connection_manager.broadcast(
+        case_id,
+        {
+            "event": "feature.updated",
+            "case_id": case_id,
+            "layer_id": layer_id,
+            "feature": updated_feature,
+        },
+    )
+
+    return result
 
 
 # ===================================================
@@ -125,66 +186,20 @@ async def remove_feature(
         logger.warning(f"Feature not found | case_id={case_id} | layer_id={layer_id} | feature_id={feature_id}")
         raise NotFoundError(FEATURE_NOT_FOUND)
 
-    return await delete_feature(feature_id, db)
+    result = await delete_feature(feature_id, db)
 
-
-# ===================================================
-# GET SINGLE FEATURE BY NUMBER (scoped to case + layer) — any authenticated user
-# ===================================================
-@router.get("/cases/{case_id}/layers/{layer_id}/features/{feature_number}", response_model=FeatureResponse)
-async def get_single_feature(
-    case_id: int,
-    layer_id: int,
-    feature_number: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-
-    logger.info(f"GET /cases/{case_id}/layers/{layer_id}/features/{feature_number} | user_id={current_user['user_id']}")
-
-    feature = await get_feature_by_number(case_id, layer_id, feature_number, db)
-
-    if not feature:
-        logger.warning(f"Feature not found | case_id={case_id} | layer_id={layer_id} | feature_number={feature_number}")
-        raise NotFoundError(FEATURE_NOT_FOUND)
-
-    return feature
-
-# ===================================================
-# GET FEATURES OF A LAYER (scoped to case) — any authenticated user
-# ===================================================
-@router.get("/cases/{case_id}/layers/{layer_id}/features", response_model=list[FeatureSummaryResponse])
-async def list_layer_features(
-    case_id: int,
-    layer_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-
-    logger.info(f"GET /cases/{case_id}/layers/{layer_id}/features | user_id={current_user['user_id']}")
-
-    layer = await get_layer(layer_id, db)
-
-    if not layer or layer["case_id"] != case_id:
-        logger.warning(f"Layer not found | case_id={case_id} | layer_id={layer_id}")
-        raise NotFoundError(LAYER_NOT_FOUND)
-
-    return await get_layer_features(layer_id, db)
-
-
-
-# ===================================================
-# GET FEATURES OF A CASE — any authenticated user
-# ===================================================
-@router.get("/cases/{case_id}/features", response_model=list[FeatureResponse])
-async def list_case_features(
-    case_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-
-    logger.info(
-        f"GET /cases/{case_id}/features | user_id={current_user['user_id']}"
+    await feature_connection_manager.broadcast(
+        case_id,
+        {
+            "event": "feature.deleted",
+            "case_id": case_id,
+            "layer_id": layer_id,
+            "feature_id": feature_id,
+            "feature_number": existing["feature_number"],
+        },
     )
 
-    return await get_case_features(case_id, db)
+    return result
+
+
+# ===================================================

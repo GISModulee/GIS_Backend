@@ -15,6 +15,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
 from geoalchemy2 import Geography, Geometry
+from models.reference_layer import ReferenceLayer
+from models.reference_feature import ReferenceFeature
 
 
 from database.database import Base
@@ -106,7 +108,12 @@ class Feature(Base):
     layer = relationship("Layer", back_populates="features")
     case = relationship("Case", back_populates="features")
     creator = relationship("User", back_populates="features_created")
-    comments = relationship("Comment", back_populates="feature")
+    comments = relationship(
+        "Comment",
+        back_populates="feature",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     __table_args__ = (
         UniqueConstraint(
             "case_id",

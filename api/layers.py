@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from database.database import get_db
 from schemas.layer_schema import LayerActionResponse, LayerCreate, LayerCreateResponse, LayerPatch, LayerResponse
-from utils.constants import LAYER_NOT_FOUND
+from utils.constants import LAYER_NOT_FOUND, WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.exceptions import NotFoundError
+from utils.auth_utils import decode_access_token
 from utils.dependencies import get_current_user, require_roles
 from utils.roles import CAN_WRITE, CAN_DELETE_OPERATIONAL
 from services.layer.layer_service import (
@@ -16,7 +17,8 @@ from services.layer.layer_service import (
     get_case_layers,
     patch_layer,
 )
-
+from services.layer.layer_websocket_manager import layer_connection_manager
+from services.feature.feature_websocket_manager import feature_connection_manager
 from utils.logger import logger
 
 router = APIRouter(
@@ -28,7 +30,21 @@ router = APIRouter(
 @router.post("", response_model=LayerCreateResponse)
 async def add_layer(layer: LayerCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
     logger.info(f"POST /layers | user_id={current_user['user_id']} | role={current_user['role']} | body={layer.model_dump()}")
-    return await create_layer(layer.model_dump(), db)
+
+    result = await create_layer(layer.model_dump(), db)
+
+    created_layer = await get_layer(result["layer_id"], db)
+
+    message = {
+        "event": "layer.created",
+        "case_id": created_layer["case_id"],
+        "layer": created_layer,
+    }
+
+    await layer_connection_manager.broadcast(created_layer["case_id"], message)
+    await feature_connection_manager.broadcast(created_layer["case_id"], message)
+
+    return result
 
 
 @router.get("", response_model=list[LayerResponse])
@@ -77,7 +93,21 @@ async def edit_layer(
         logger.warning(f"Layer not found | case_id={case_id} | layer_id={layer_id}")
         raise NotFoundError(LAYER_NOT_FOUND)
 
-    return await update_layer(layer_id, layer.model_dump(), db)
+    result = await update_layer(layer_id, layer.model_dump(), db)
+
+    updated_layer = await get_layer(layer_id, db)
+
+    message = {
+        "event": "layer.updated",
+        "case_id": case_id,
+        "layer_id": layer_id,
+        "layer": updated_layer,
+    }
+
+    await layer_connection_manager.broadcast(case_id, message)
+    await feature_connection_manager.broadcast(case_id, message)
+
+    return result
 
 
 @router.patch("/case/{case_id}/{layer_id}", response_model=LayerActionResponse)
@@ -96,7 +126,21 @@ async def edit_layer_partial(
         logger.warning(f"Layer not found | case_id={case_id} | layer_id={layer_id}")
         raise NotFoundError(LAYER_NOT_FOUND)
 
-    return await patch_layer(layer_id, layer.model_dump(exclude_unset=True), db)
+    result = await patch_layer(layer_id, layer.model_dump(exclude_unset=True), db)
+
+    updated_layer = await get_layer(layer_id, db)
+
+    message = {
+        "event": "layer.updated",
+        "case_id": case_id,
+        "layer_id": layer_id,
+        "layer": updated_layer,
+    }
+
+    await layer_connection_manager.broadcast(case_id, message)
+    await feature_connection_manager.broadcast(case_id, message)
+
+    return result
 
 
 @router.delete("/case/{case_id}/{layer_id}", response_model=LayerActionResponse)
@@ -114,4 +158,59 @@ async def remove_layer(
         logger.warning(f"Layer not found | case_id={case_id} | layer_id={layer_id}")
         raise NotFoundError(LAYER_NOT_FOUND)
 
-    return await delete_layer(layer_id, db)
+    result = await delete_layer(layer_id, db)
+
+    message = {
+        "event": "layer.deleted",
+        "case_id": case_id,
+        "layer_id": layer_id,
+    }
+
+    await layer_connection_manager.broadcast(case_id, message)
+    await feature_connection_manager.broadcast(case_id, message)
+
+    return result
+
+
+# ===================================================
+# LIVE LAYER UPDATES (per case) — WebSocket
+# ===================================================
+# Broadcasts layer.created / layer.updated / layer.deleted to every
+# client viewing this case's map. Does NOT send an initial snapshot on
+# connect — the frontend is expected to already have loaded layers via
+# GET /layers/case/{case_id} before opening this connection; this is
+# for live deltas only.
+
+@router.websocket("/ws/cases/{case_id}/layers")
+async def case_layer_updates(websocket: WebSocket, case_id: int):
+    """Push live layer.created/updated/deleted events to authenticated case subscribers."""
+    token = websocket.query_params.get("token")
+    payload = decode_access_token(token) if token else None
+    if not payload or payload.get("user_id") is None or payload.get("sub") is None:
+        logger.warning(
+            "Layer WebSocket authentication rejected | case_id=%s",
+            case_id,
+        )
+        await websocket.close(code=WEBSOCKET_POLICY_VIOLATION, reason=WEBSOCKET_AUTH_REQUIRED)
+        return
+
+    await layer_connection_manager.connect(case_id, websocket)
+    try:
+        await websocket.send_json(
+            {
+                "event": "connection.ready",
+                "case_id": case_id,
+            }
+        )
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.warning(
+            "Layer WebSocket closed unexpectedly | case_id=%s | error=%s",
+            case_id,
+            type(exc).__name__,
+        )
+    finally:
+        layer_connection_manager.disconnect(case_id, websocket)

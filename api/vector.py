@@ -19,6 +19,10 @@ from services.vector.vector_services import (
     buffer_feature,
     centroid_feature
 )
+from services.feature.feature_service import get_feature
+from services.layer.layer_service import get_layer
+from services.layer.layer_websocket_manager import layer_connection_manager
+from services.feature.feature_websocket_manager import feature_connection_manager
 
 from utils.dependencies import get_current_user
 
@@ -29,19 +33,63 @@ router = APIRouter(
 )
 
 
+async def _broadcast_vector_result_created(result, db):
+    if not result:
+        return
+
+    layer_id = result.get("layer_id")
+    feature_id = result.get("feature_id")
+    if layer_id is None or feature_id is None:
+        return
+
+    created_layer = await get_layer(layer_id, db)
+    if created_layer is None:
+        return
+
+    message = {
+        "event": "layer.created",
+        "case_id": created_layer["case_id"],
+        "layer": created_layer,
+    }
+    await layer_connection_manager.broadcast(
+        created_layer["case_id"],
+        message,
+    )
+    await feature_connection_manager.broadcast(
+        created_layer["case_id"],
+        message,
+    )
+
+    created_feature = await get_feature(feature_id, db)
+    if created_feature is None:
+        return
+
+    await feature_connection_manager.broadcast(
+        created_layer["case_id"],
+        {
+            "event": "feature.created",
+            "case_id": created_layer["case_id"],
+            "layer_id": layer_id,
+            "feature": created_feature,
+        },
+    )
+
+
 @router.post("/union")
 async def union(
     operation: VectorOperation,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await union_features(
+    result = await union_features(
         operation.case_id,
         operation.feature_numbers,
         db,
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
 
 
 @router.post("/intersection")
@@ -50,13 +98,15 @@ async def intersection(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await intersection_features(
+    result = await intersection_features(
         operation.case_id,
         operation.feature_numbers,
         db,
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
 
 
 @router.post("/difference")
@@ -65,13 +115,15 @@ async def difference(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await difference_features(
+    result = await difference_features(
         operation.case_id,
         operation.feature_numbers,
         db,
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
 
 
 @router.post("/symdifference")
@@ -80,13 +132,15 @@ async def symdifference(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await symdifference_features(
+    result = await symdifference_features(
         operation.case_id,
         operation.feature_numbers,
         db,
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
 
 
 @router.post("/buffer")
@@ -95,7 +149,7 @@ async def buffer(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await buffer_feature(
+    result = await buffer_feature(
         operation.case_id,
         operation.feature_number,
         operation.distance,
@@ -103,6 +157,8 @@ async def buffer(
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
 
 
 @router.post("/centroid")
@@ -111,13 +167,15 @@ async def centroid(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await centroid_feature(
+    result = await centroid_feature(
         operation.case_id,
         operation.feature_number,
         db,
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
 
 
 @router.post("/convex-hull")
@@ -126,10 +184,12 @@ async def convex(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return await convex_hull(
+    result = await convex_hull(
         operation.case_id,
         operation.feature_numbers,
         db,
         current_user["user_id"],
         operation.layer_name,
     )
+    await _broadcast_vector_result_created(result, db)
+    return result
