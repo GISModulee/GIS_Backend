@@ -73,8 +73,18 @@ class Layer(Base):
     file_hash = Column(String(64), nullable=True, index=True)
 
     case = relationship("Case", back_populates="layers")
-    features = relationship("Feature", back_populates="layer")
-    images = relationship("ImageRecord", back_populates="layer")
+    features = relationship(
+        "Feature",
+        back_populates="layer",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    images = relationship(
+        "ImageRecord",
+        back_populates="layer",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         # No two layers in the same case may share a name. NULL case_id
@@ -182,7 +192,7 @@ class ImageRecord(Base):
 
     id = Column(String, primary_key=True, index=True)
     file_hash = Column(String, unique=True, index=True, nullable=False)
-    layer_id = Column(Integer, ForeignKey("layers.id"), nullable=False, index=True)
+    layer_id = Column(Integer, ForeignKey("layers.id", ondelete="CASCADE"), nullable=False, index=True)
     image_data = Column(LargeBinary, nullable=False)
     filename = Column(String, nullable=False)
 

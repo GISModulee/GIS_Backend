@@ -138,21 +138,13 @@ class KMLExtractor(BaseExtractor):
         if gdf.empty:
             feature_iter = _parse_kml_features(file_path)
 
-        imported = _ingest_features(case_id, layer_id, feature_iter, created_by, db)
+        created_features = _ingest_features(case_id, layer_id, feature_iter, created_by, db)
 
         return {
             "success": True,
             "status": "imported",
             "layer_id": layer_id,
             "layer_name": resolved_layer_name,
-            "imported_features": len(imported),
-            "feature_ids": [
-                feature["feature_id"]
-                for feature in imported
-            ],
-            "feature_numbers": [
-                feature["feature_number"]
-                for feature in imported
-            ],
+            "imported_features": len(created_features),
+            "created_features": created_features,
         }
-

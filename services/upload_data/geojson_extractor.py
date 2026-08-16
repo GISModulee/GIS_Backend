@@ -133,20 +133,13 @@ class GeoJSONExtractor(BaseExtractor):
                 name = properties.get("Name") or properties.get("name")
                 yield name, geometry, properties
 
-        imported = _ingest_features(case_id, layer_id, _geojson_features(), created_by, db)
+        created_features = _ingest_features(case_id, layer_id, _geojson_features(), created_by, db)
 
         return {
             "success": True,
             "status": "imported",
             "layer_id": layer_id,
             "layer_name": resolved_layer_name,
-            "imported_features": len(imported),
-            "feature_ids": [
-                feature["feature_id"]
-                for feature in imported
-            ],
-            "feature_numbers": [
-                feature["feature_number"]
-                for feature in imported
-            ],
+            "imported_features": len(created_features),
+            "created_features": created_features,
         }
