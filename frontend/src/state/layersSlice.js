@@ -235,6 +235,42 @@ const layersSlice = createSlice({
       layer.features.push(makeFeature({ ...featureData, layerLocalId }));
     },
 
+    addFeaturesBatch(state, action) {
+      const { layerLocalId, featuresData } = action.payload;
+      let layer = state.items.find((l) => l.localId === layerLocalId);
+      if (!layer) {
+        const firstFeature = featuresData[0] || {};
+        layer = {
+          localId: layerLocalId,
+          backendId: firstFeature.layer_id,
+          status: "saved",
+          name: `Layer ${firstFeature.layer_id}`,
+          type: "group",
+          visible: true,
+          color: "#2563eb",
+          features: [],
+          expanded: true,
+          error: null,
+        };
+        state.items.push(layer);
+      }
+
+      featuresData.forEach((featureData) => {
+        const backendId = featureData.backendId || featureData.id;
+        const index = layer.features.findIndex(
+          (feat) => feat.backendId === backendId || feat.localId === `local_feat_${backendId}`
+        );
+        if (index === -1) {
+          layer.features.push(makeFeature({ ...featureData, layerLocalId }));
+        } else {
+          layer.features[index] = {
+            ...layer.features[index],
+            ...makeFeature({ ...featureData, layerLocalId }),
+          };
+        }
+      });
+    },
+
     updateFeature(state, action) {
       const { layerLocalId, featureLocalId, changes } = action.payload;
       const layer = state.items.find((l) => l.localId === layerLocalId);
@@ -369,7 +405,7 @@ export const {
   setLayerBackendId, setFeatureBackendId, setFeatureHasComments,
   addLayer, addLayerFromBackend, updateLayer, deleteLayer,
   toggleLayerVisible, toggleLayerExpanded, selectLayer, selectFeature, setHoveredFeatureId,
-  addFeature, updateFeature, deleteFeature,
+  addFeature, addFeaturesBatch, updateFeature, deleteFeature,
   toggleFeatureVisible, moveFeature,
   setPendingGeometry, clearPendingGeometry, confirmSaveShape,
   setBackendGeoJson, clearBackendGeoJson,

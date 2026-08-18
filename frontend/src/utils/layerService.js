@@ -60,6 +60,11 @@ const layerService = {
     return data;
   },
 
+  getFeaturesByCase: async (caseId) => {
+    const { data } = await axiosInstance.get(`/cases/${caseId}/features`);
+    return data;
+  },
+
   getSingleFeature: async (caseId, layerId, featureNumber) => {
     const { data } = await axiosInstance.get(`/cases/${caseId}/layers/${layerId}/features/${featureNumber}`);
     return data;

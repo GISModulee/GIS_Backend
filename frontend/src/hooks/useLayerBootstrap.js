@@ -17,75 +17,49 @@ export function useLayerBootstrap() {
       const layers = await layerService.getAllForCase(activeCaseId);
       console.log("[loadLayersFromBackend] layers:", layers);
 
+      let caseFeatures = [];
+      try {
+        caseFeatures = await layerService.getFeaturesByCase(activeCaseId);
+      } catch (err) {
+        console.warn("[Bootstrap] Failed to fetch bulk case features:", err);
+      }
+
       const hydrated = [];
       for (const layer of layers) {
         const layerLocalId = `local_${layer.id}`;
         const isGeoclipLayer = layer.layer_type === "geoclip";
 
         let featuresList = [];
-        try {
-          const res = isGeoclipLayer
-            ? await layerService.getGeoclipFeatures(layer.id)
-            : await layerService.getFeaturesByLayer(activeCaseId, layer.id);
-          if (Array.isArray(res)) {
-            featuresList = res;
-          } else if (res && Array.isArray(res.features)) {
-            featuresList = res.features;
-          } else if (res && Array.isArray(res.data)) {
-            featuresList = res.data;
+        if (isGeoclipLayer) {
+          try {
+            const res = await layerService.getGeoclipFeatures(layer.id);
+            if (Array.isArray(res)) {
+              featuresList = res;
+            } else if (res && Array.isArray(res.features)) {
+              featuresList = res.features;
+            } else if (res && Array.isArray(res.data)) {
+              featuresList = res.data;
+            }
+          } catch (err) {
+            console.warn(`[Bootstrap] Failed to fetch layer features for layer ${layer.id}:`, err);
           }
-        } catch (err) {
-          console.warn(`[Bootstrap] Failed to fetch layer features for layer ${layer.id}:`, err);
+        } else {
+          featuresList = caseFeatures.filter(
+            (f) => Number(f.layer_id) === Number(layer.id)
+          );
         }
 
         const isImagePredictionLayer = isGeoclipLayer || (layer.name && /\.(png|jpe?g|gif|webp|tiff?|bmp)$/i.test(layer.name));
 
-        const pLimit = async (items, concurrency, fn) => {
-          const results = [];
-          const executing = new Set();
-          for (const item of items) {
-            const p = Promise.resolve().then(() => fn(item));
-            results.push(p);
-            executing.add(p);
-            const clean = () => executing.delete(p);
-            p.then(clean, clean);
-            if (executing.size >= concurrency) {
-              await Promise.race(executing);
-            }
-          }
-          return Promise.all(results);
-        };
-
-        const resolvedFeatures = await pLimit(
-          featuresList.map((rawItem, index) => ({ rawItem, index })),
-          40,
-          async ({ rawItem, index }) => {
-            const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
-            const initialFeatureNumber =
-              toInt(rawItem.feature_number) ??
-              toInt(rawItem.properties?.feature_number) ??
-              toInt(rawItem.id) ??
-              (index + 1);
-
-            let f = rawItem;
-            // Skip per-feature detail fetch if geometry is already present or it's a geoclip layer
-            if (!isGeoclipLayer && !rawItem.geometry) {
-              try {
-                const singleRes = await layerService.getSingleFeature(activeCaseId, layer.id, initialFeatureNumber);
-                if (singleRes && typeof singleRes === "object") {
-                  f = { ...rawItem, ...singleRes };
-                }
-              } catch (err) {
-                console.warn(`[Bootstrap] Failed to fetch single feature ${initialFeatureNumber} for layer ${layer.id}:`, err);
-              }
-            }
-            return { rawItem, f, index, initialFeatureNumber };
-          }
-        );
-
         const features = [];
-        for (const { rawItem, f, index, initialFeatureNumber } of resolvedFeatures) {
+        featuresList.forEach((f, index) => {
           const toInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : null; };
+          const initialFeatureNumber =
+            toInt(f.feature_number) ??
+            toInt(f.properties?.feature_number) ??
+            toInt(f.id) ??
+            (index + 1);
+
           let geometry = f.geometry;
           if (typeof geometry === "string") {
             try {
@@ -150,15 +124,15 @@ export function useLayerBootstrap() {
             commentsList: [],
             comments_count: 0,
             hasComments:
-              rawItem.has_comments === true ||
-              rawItem.has_comments === 1 ||
-              rawItem.has_comments === "true" ||
-              (typeof rawItem.comments_count === "number" && rawItem.comments_count > 0) ||
-              (typeof rawItem.comments_count === "string" && parseInt(rawItem.comments_count, 10) > 0) ||
-              (Array.isArray(rawItem.comments) && rawItem.comments.length > 0) ||
-              (Array.isArray(rawItem.commentsList) && rawItem.commentsList.length > 0),
+              f.has_comments === true ||
+              f.has_comments === 1 ||
+              f.has_comments === "true" ||
+              (typeof f.comments_count === "number" && f.comments_count > 0) ||
+              (typeof f.comments_count === "string" && parseInt(f.comments_count, 10) > 0) ||
+              (Array.isArray(f.comments) && f.comments.length > 0) ||
+              (Array.isArray(f.commentsList) && f.commentsList.length > 0),
           });
-        }
+        });
 
         hydrated.push({
           localId: layerLocalId,
