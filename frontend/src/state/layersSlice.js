@@ -1,5 +1,6 @@
 // src/state/layersSlice.js
 import { createSlice } from "@reduxjs/toolkit";
+import { confirmSaveShape } from "./drawingSlice.js";
 
 let _id = 1;
 export const tempId = () => `local_${_id++}`;
@@ -60,28 +61,10 @@ const layersSlice = createSlice({
   name: "layers",
   initialState: {
     items: [],
-    resultLayers: [], // Store frontend-only Turf computed layers
     selectedLayerId: null,
     selectedFeatureId: null,
     hoveredFeatureId: null,
-    pendingGeometry: null,
-    pendingType: null,
-    pendingColor: "#2563eb",
-
     backendGeoJson: null,
-    commentModal: {
-      open: false,
-      featureBackendId: null,
-    },
-    deleteConfirm: {
-      open: false,
-      type: null,
-      targetId: null,
-      backendId: null,
-      layerLocalId: null,
-      name: "",
-      featuresList: [],
-    },
   },
 
   reducers: {
@@ -305,27 +288,11 @@ const layersSlice = createSlice({
       feature.layerLocalId = toLayerLocalId;
       toLayer.features.push(feature);
     },
+  },
 
-    // ── Drawing modal state ──────────────────────────────
-
-    setPendingGeometry(state, action) {
-      state.pendingGeometry = action.payload.geometry;
-      state.pendingType = action.payload.type;
-      state.pendingColor = action.payload.color || "#2563eb";
-    },
-
-    clearPendingGeometry(state) {
-      state.pendingGeometry = null;
-      state.pendingType = null;
-      state.pendingColor = "#2563eb";
-    },
-
-    // preFeatureLocalId / preLayerLocalId are pre-generated in useLayers
-    // so the hook can reference them after dispatch for backend ID sync
-    confirmSaveShape(state, action) {
-      const { name, category, color, preFeatureLocalId, preLayerLocalId } = action.payload;
-      const geometry = state.pendingGeometry;
-      const type = state.pendingType;
+  extraReducers: (builder) => {
+    builder.addCase(confirmSaveShape, (state, action) => {
+      const { name, category, color, preFeatureLocalId, preLayerLocalId, geometry, type } = action.payload;
       if (!geometry) return;
 
       let targetLayer = state.items.find((l) => l.localId === state.selectedLayerId);
@@ -349,55 +316,11 @@ const layersSlice = createSlice({
       targetLayer.features.push(feature);
       targetLayer.expanded = true;
 
-      state.pendingGeometry = null;
-      state.pendingType = null;
-      state.pendingColor = "#2563eb";
-
       // Clear selection so the newly saved shape is not selected
       state.selectedFeatureId = null;
       state.selectedLayerId = null;
-    },
-    openCommentModal(state, action) {
-      state.commentModal = { open: true, featureBackendId: action.payload };
-    },
-    closeCommentModal(state) {
-      state.commentModal = { open: false, featureBackendId: null };
-    },
-    addResultLayer(state, action) {
-      state.resultLayers = state.resultLayers.filter(r => r.name !== action.payload.name);
-      state.resultLayers.push(action.payload);
-    },
-    removeResultLayer(state, action) {
-      state.resultLayers = state.resultLayers.filter(r => r.id !== action.payload);
-    },
-    toggleResultLayerVisibility(state, action) {
-      const r = state.resultLayers.find(r => r.id === action.payload);
-      if (r) r.visible = !r.visible;
-    },
-    openDeleteConfirm(state, action) {
-      const { type, targetId, backendId, layerLocalId, name, featuresList } = action.payload;
-      state.deleteConfirm = {
-        open: true,
-        type,
-        targetId,
-        backendId,
-        layerLocalId,
-        name,
-        featuresList: featuresList || [],
-      };
-    },
-    closeDeleteConfirm(state) {
-      state.deleteConfirm = {
-        open: false,
-        type: null,
-        targetId: null,
-        backendId: null,
-        layerLocalId: null,
-        name: "",
-        featuresList: [],
-      };
-    },
-  },
+    });
+  }
 });
 
 export const {
@@ -407,11 +330,7 @@ export const {
   toggleLayerVisible, toggleLayerExpanded, selectLayer, selectFeature, setHoveredFeatureId,
   addFeature, addFeaturesBatch, updateFeature, deleteFeature,
   toggleFeatureVisible, moveFeature,
-  setPendingGeometry, clearPendingGeometry, confirmSaveShape,
   setBackendGeoJson, clearBackendGeoJson,
-  openCommentModal, closeCommentModal,
-  addResultLayer, removeResultLayer, toggleResultLayerVisibility,
-  openDeleteConfirm, closeDeleteConfirm,
 } = layersSlice.actions;
 
 export default layersSlice.reducer;

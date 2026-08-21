@@ -1,7 +1,7 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
 import { useDispatch } from "react-redux";
-import { openDeleteConfirm } from "@/state/layersSlice.js";
+import { openDeleteConfirm } from "@/state/drawingSlice.js";
 import {
   ChevronDown,
   ChevronRight,

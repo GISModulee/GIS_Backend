@@ -14,7 +14,8 @@ import { useLayers } from "@/hooks/useLayers.js";
 import { useMap } from "@/hooks/useMap.js";
 import LayerRenderer from "../layerRenderer/LayerRenderer.jsx";
 import { useDispatch } from "react-redux";
-import { setHoveredFeatureId, openDeleteConfirm } from "@/state/layersSlice.js";
+import { setHoveredFeatureId } from "@/state/layersSlice.js";
+import { openDeleteConfirm } from "@/state/drawingSlice.js";
 
 export default function FeatureRow({ feature, layer, onDragStart }) {
   const dispatch = useDispatch();

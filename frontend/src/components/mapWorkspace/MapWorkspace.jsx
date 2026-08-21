@@ -6,7 +6,7 @@ import RightSidebar from "../rightSidebar/RightSidebar";
 import MapToolbar from "../mapToolbar/MapToolbar";
 import MapView from "../mapView/MapView";
 import SaveShapeModal from "../saveShapeModal/SaveShapeModal.jsx";
-import { clearPendingGeometry } from "../../state/layersSlice.js";
+import { clearPendingGeometry } from "../../state/drawingSlice.js";
 import DrawingManager from "../drawingManager/DrawingManager.jsx";
 import { useLayers } from "../../hooks/useLayers.js";
 import CommentModal from "../commentModal/CommentModal.jsx";
@@ -22,8 +22,8 @@ const HEADER_HEIGHT = 56;
 // ── Modal controller ──────────────────────────────────────
 function ModalController() {
   const dispatch = useDispatch();
-  const pendingGeometry = useSelector((s) => s.layers.pendingGeometry);
-  const pendingType = useSelector((s) => s.layers.pendingType);
+  const pendingGeometry = useSelector((s) => s.drawing.pendingGeometry);
+  const pendingType = useSelector((s) => s.drawing.pendingType);
   const { saveShape } = useLayers();
 
   if (!pendingGeometry) return null;

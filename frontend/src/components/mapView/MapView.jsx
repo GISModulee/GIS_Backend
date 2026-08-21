@@ -23,7 +23,7 @@ function TileLayerSwitcher() {
       attribution=""
       subdomains={provider.subdomains || "abc"}
       maxZoom={18}
-      noWrap={true}
+      noWrap={false}
     />
   );
 }
@@ -59,12 +59,6 @@ function MapResizer({ sidebarOpen }) {
       window.requestAnimationFrame(() => {
         try {
           map.invalidateSize({ pan: false });
-          const minimumCoverZoom = map.getBoundsZoom(worldBounds, true);
-          map.setMinZoom(minimumCoverZoom);
-          if (map.getZoom() < minimumCoverZoom) {
-            map.setZoom(minimumCoverZoom);
-          }
-          map.panInsideBounds(worldBounds, { animate: false });
         } catch (e) {
           console.warn("Error invalidating map size:", e);
         }
@@ -109,6 +103,11 @@ function MapResizer({ sidebarOpen }) {
   return null;
 }
 
+const infiniteHorizontalBounds = L.latLngBounds(
+  [-85.05112878, -1000000],
+  [85.05112878, 1000000]
+);
+
 const indiaBounds = [
   [6.75, 68.18],
   [37.08, 97.42],
@@ -116,7 +115,7 @@ const indiaBounds = [
 
 export default function MapView({ sidebarOpen }) {
   const { caseId } = useParams();
-  const resultLayers = useSelector((s) => s.layers.resultLayers) || [];
+  const resultLayers = useSelector((s) => s.resultLayers.resultLayers) || [];
   const [attribution, setAttribution] = useState(null);
 
   return (
@@ -127,10 +126,9 @@ export default function MapView({ sidebarOpen }) {
         zoom={5}
         zoomControl={false}
         attributionControl={false}
-        maxBounds={worldBounds}
-        maxBoundsViscosity={1.0}
-        worldCopyJump={false}
+        worldCopyJump={true}
         minZoom={2}
+        maxBounds={infiniteHorizontalBounds}
         className="w-full h-full"
         style={{ height: "100%", width: "100%" }}
       >

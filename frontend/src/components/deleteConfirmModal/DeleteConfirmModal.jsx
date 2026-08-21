@@ -1,13 +1,13 @@
 import { X, AlertTriangle } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
-import { closeDeleteConfirm } from "@/state/layersSlice.js";
+import { closeDeleteConfirm } from "@/state/drawingSlice.js";
 import { useLayers } from "@/hooks/useLayers.js";
 
 export default function DeleteConfirmModal() {
   const dispatch = useDispatch();
   const { removeLayer, removeFeature } = useLayers();
   const { open, type, targetId, backendId, layerLocalId, name, featuresList } = useSelector(
-    (s) => s.layers.deleteConfirm || { open: false }
+    (s) => s.drawing.deleteConfirm || { open: false }
   );
 
   if (!open) return null;

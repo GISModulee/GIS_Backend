@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
-import { openCommentModal } from "@/state/layersSlice.js";
+import { openCommentModal } from "@/state/drawingSlice.js";
 import toast from "react-hot-toast";
 import {
   MousePointer2,

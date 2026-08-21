@@ -7,12 +7,12 @@ import { useFeatureActions } from "./useFeatureActions.js";
 export function useLayers() {
   const items = useSelector((s) => s.layers.items);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
-  const pendingGeometry = useSelector((s) => s.layers.pendingGeometry);
-  const pendingType = useSelector((s) => s.layers.pendingType);
-  const pendingColor = useSelector((s) => s.layers.pendingColor);
+  const pendingGeometry = useSelector((s) => s.drawing.pendingGeometry);
+  const pendingType = useSelector((s) => s.drawing.pendingType);
+  const pendingColor = useSelector((s) => s.drawing.pendingColor);
   const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
   const hoveredFeatureId = useSelector((s) => s.layers.hoveredFeatureId);
-  const resultLayers = useSelector((s) => s.layers.resultLayers);
+  const resultLayers = useSelector((s) => s.resultLayers.resultLayers);
 
   const { loadLayersFromBackend } = useLayerBootstrap();
   const { holdDrawnShape, cancelDrawing, saveShape } = useLayerDrawing();

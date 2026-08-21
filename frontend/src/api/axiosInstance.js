@@ -39,11 +39,13 @@ axiosInstance.interceptors.response.use(
       res.data.status === "error" &&
       (res.data.detail?.includes("authenticated") || res.data.detail?.includes("token"))
     ) {
+      const backendError = res.data.detail || "Session expired. Please log in again.";
+      sessionStorage.setItem("login_redirect_error", backendError);
       const theme = localStorage.getItem("theme");
       localStorage.clear();
       if (theme) localStorage.setItem("theme", theme);
       window.location.href = "/login";
-      return Promise.reject(new Error(res.data.detail));
+      return Promise.reject(new Error(backendError));
     }
 
     if (res.data && res.data.status === "error") {
@@ -62,26 +64,30 @@ axiosInstance.interceptors.response.use(
       return Promise.reject(err);
     }
 
-    // If the backend has a connection error or timeout, redirect to login and show Network Error toast
+    // If the backend has a connection error or timeout, show network error on current page and reject
     if (!err.response) {
       if (import.meta.env.DEV) {
         console.error("[API Network Error]:", err);
       }
-      
-      if (window.location.pathname !== "/login") {
-        sessionStorage.setItem("network_error_toast", "true");
-        const theme = localStorage.getItem("theme");
-        localStorage.clear();
-        if (theme) localStorage.setItem("theme", theme);
-        window.location.href = "/login";
-        return new Promise(() => {}); // Suspend promise to prevent local catch blocks from showing duplicate toasts
-      }
+      err.message = "Network Error";
       return Promise.reject(err);
     }
 
-    // If we get a 401 Unauthorized, clear state and redirect to login
+    // If we get a 401 Unauthorized, clear state and redirect to login, showing the backend error
     if (err.response?.status === 401 && !isBoundaryRequest) {
       if (window.location.pathname !== "/login") {
+        const errorData = err.response.data;
+        const detail = errorData?.detail || errorData?.message || errorData?.error || "Session expired. Please log in again.";
+        let errorMsg = "Session expired. Please log in again.";
+        if (detail) {
+          if (Array.isArray(detail)) {
+            errorMsg = detail.map(d => `${d.loc ? d.loc.join('.') + ': ' : ''}${d.msg || JSON.stringify(d)}`).join(', ');
+          } else {
+            errorMsg = typeof detail === 'object' ? JSON.stringify(detail) : detail;
+          }
+        }
+        sessionStorage.setItem("login_redirect_error", errorMsg);
+
         const theme = localStorage.getItem("theme");
         localStorage.clear();
         if (theme) localStorage.setItem("theme", theme);

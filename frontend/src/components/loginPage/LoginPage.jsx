@@ -19,6 +19,11 @@ export default function LoginPage() {
 
     useEffect(() => {
         dispatch(logout());
+        const redirectError = sessionStorage.getItem("login_redirect_error");
+        if (redirectError) {
+            toast.error(redirectError, { id: "login-redirect-error" });
+            sessionStorage.removeItem("login_redirect_error");
+        }
         if (sessionStorage.getItem("network_error_toast") === "true") {
             toast.error("Network Error", { id: "network-error" });
             sessionStorage.removeItem("network_error_toast");

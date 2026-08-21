@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import toast from "react-hot-toast";
+import * as turf from "@turf/turf";
 import {
   updateFeature,
   deleteFeature,
@@ -54,31 +55,43 @@ export function useFeatureActions(loadLayersFromBackend) {
           const featureData = targetLayer?.features.find((f) => f.localId === featureLocalId);
 
           if (featureData && layerId) {
-            const geometryForBackend = { ...featureData.geometry };
+            let geometryForBackend = { ...featureData.geometry };
             let center = undefined;
             let radius = undefined;
 
             const isCircle = featureData.type === "circle";
 
-            if (geometryForBackend.center) {
-              if (isCircle) {
+            if (isCircle && geometryForBackend.type === "Point") {
+              const geomCenter = featureData.center || featureData.properties?.center || geometryForBackend.center;
+              const geomRadius = featureData.radius || featureData.properties?.radius || geometryForBackend.radius;
+
+              if (geomCenter) {
                 center = {
-                  lat: parseFloat(geometryForBackend.center.lat),
-                  lng: parseFloat(geometryForBackend.center.lng),
+                  lat: parseFloat(geomCenter.lat),
+                  lng: parseFloat(geomCenter.lng),
                 };
               }
-              delete geometryForBackend.center;
-            }
-            if (geometryForBackend.radius) {
-              if (isCircle) {
-                radius = parseFloat(geometryForBackend.radius);
+              if (geomRadius) {
+                radius = parseFloat(geomRadius);
               }
-              delete geometryForBackend.radius;
-            }
 
-            if (isCircle && !center && geometryForBackend.coordinates && typeof geometryForBackend.coordinates[0] === "number") {
-              const [lng, lat] = geometryForBackend.coordinates;
-              center = { lat, lng };
+              if (!center && geometryForBackend.coordinates && typeof geometryForBackend.coordinates[0] === "number") {
+                const [lng, lat] = geometryForBackend.coordinates;
+                center = { lat, lng };
+              }
+
+              if (center && radius != null) {
+                const centerLngLat = [center.lng, center.lat];
+                const turfCircle = turf.circle(centerLngLat, radius, { units: 'meters', steps: 64 });
+                geometryForBackend = turfCircle.geometry;
+              }
+            } else {
+              if (geometryForBackend.center) {
+                delete geometryForBackend.center;
+              }
+              if (geometryForBackend.radius) {
+                delete geometryForBackend.radius;
+              }
             }
 
             const payload = {
@@ -87,9 +100,9 @@ export function useFeatureActions(loadLayersFromBackend) {
               case_id: resolvedCaseId,
               created_by: 1,
               geometry: geometryForBackend,
-              geometry_type: featureData.type
+              geometry_type: isCircle ? "Polygon" : (featureData.type
                 ? featureData.type.charAt(0).toUpperCase() + featureData.type.slice(1)
-                : "Polygon",
+                : "Polygon"),
               properties: featureData.properties || {},
               ...(center && { center }),
               ...(radius && { radius }),

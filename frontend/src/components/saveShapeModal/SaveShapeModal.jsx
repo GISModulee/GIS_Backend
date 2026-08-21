@@ -7,7 +7,7 @@ import toast from "react-hot-toast";
 const CATEGORIES = ["Terrorist", "Crime", "Surveillance", "Patrol", "Other"];
 
 export default function SaveShapeModal({ type, onSave, onCancel }) {
-  const pendingColor = useSelector((s) => s.layers.pendingColor);
+  const pendingColor = useSelector((s) => s.drawing.pendingColor);
 
   const [name, setName] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0]);

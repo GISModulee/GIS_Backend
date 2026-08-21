@@ -2,12 +2,12 @@ import { useState } from "react";
 import { Layers, Eye, EyeOff, Trash2, Search, X } from "lucide-react";
 import { useSelector, useDispatch } from "react-redux";
 import { useLayers } from "@/hooks/useLayers.js";
-import { toggleResultLayerVisibility, removeResultLayer } from "@/state/layersSlice.js";
+import { toggleResultLayerVisibility, removeResultLayer } from "@/state/resultLayersSlice.js";
 import LayerRow from "../layerRow/LayerRow.jsx";
 
 export default function LayerPanel() {
   const { items } = useLayers();
-  const resultLayers = useSelector((s) => s.layers.resultLayers) || [];
+  const resultLayers = useSelector((s) => s.resultLayers.resultLayers) || [];
   const dispatch = useDispatch();
 
   const [searchQuery, setSearchQuery] = useState("");

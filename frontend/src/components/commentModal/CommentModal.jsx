@@ -2,7 +2,8 @@
 import { useState, useRef } from "react";
 import { X, Check, Paperclip, FileText } from "lucide-react";
 import { useDispatch, useSelector } from "react-redux";
-import { closeCommentModal, setFeatureHasComments } from "@/state/layersSlice.js";
+import { setFeatureHasComments } from "@/state/layersSlice.js";
+import { closeCommentModal } from "@/state/drawingSlice.js";
 import layerService from "@/utils/layerService.js";
 import { useMap } from "@/hooks/useMap.js";
 import { useLayers } from "@/hooks/useLayers.js";
@@ -13,7 +14,7 @@ export default function CommentModal() {
   const dispatch = useDispatch();
   const { changeActiveTool } = useMap();
   const { loadLayersFromBackend } = useLayers();
-  const { open, featureBackendId } = useSelector((s) => s.layers.commentModal);
+  const { open, featureBackendId } = useSelector((s) => s.drawing.commentModal);
   const { items } = useSelector((s) => s.layers);
 
   const [comment, setComment] = useState("");

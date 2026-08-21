@@ -2,8 +2,10 @@ import { useEffect, useMemo } from "react";
 import { useMap as useLeafletMap } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import L from "leaflet";
+import * as turf from "@turf/turf";
 import { useLayers } from "@/hooks/useLayers.js";
-import { selectFeature, openCommentModal } from "@/state/layersSlice.js";
+import { selectFeature } from "@/state/layersSlice.js";
+import { openCommentModal } from "@/state/drawingSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
 import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
 
@@ -69,20 +71,12 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         }
         const radius = feature.radius || feature.properties?.radius || feature.geometry?.radius;
 
-        // if (centerLatLng && radius != null) {
-        //   const leafletLayer = L.circle(centerLatLng, {
-        //     radius: radius,
-        //     ...style,
-        //     noWrap: true
         if (centerLatLng && radius != null) {
-          // 1. Calculate the latitude distortion factor (cos of latitude)
-          const rad = (centerLatLng[0] * Math.PI) / 180;
-          const projectionFactor = Math.cos(rad);
+          const center = [centerLatLng[1], centerLatLng[0]]; // Turf expects [lng, lat]
+          const turfCircle = turf.circle(center, radius, { units: 'meters', steps: 64 });
 
-          // 2. Pass the corrected options to lock the rendering ratio
-          const leafletLayer = L.circle(centerLatLng, {
-            radius: radius,
-            ...style,
+          const leafletLayer = L.geoJSON(turfCircle, {
+            style,
             interactive: true,
           });
 

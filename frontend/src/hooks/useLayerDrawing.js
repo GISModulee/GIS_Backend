@@ -1,15 +1,18 @@
 import { useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import toast from "react-hot-toast";
+import * as turf from "@turf/turf";
 import {
   tempId,
   setLayerBackendId,
   setFeatureBackendId,
+  deleteLayer,
+} from "@/state/layersSlice.js";
+import {
   setPendingGeometry,
   clearPendingGeometry,
   confirmSaveShape,
-  deleteLayer,
-} from "@/state/layersSlice.js";
+} from "@/state/drawingSlice.js";
 import { BACKEND_ENABLED } from "@/config/apiConfig.js";
 import layerService from "@/utils/layerService.js";
 import { useLayerBootstrap } from "./useLayerBootstrap.js";
@@ -19,8 +22,8 @@ export function useLayerDrawing() {
   const { loadLayersFromBackend } = useLayerBootstrap();
   const items = useSelector((s) => s.layers.items);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
-  const pendingGeometry = useSelector((s) => s.layers.pendingGeometry);
-  const pendingType = useSelector((s) => s.layers.pendingType);
+  const pendingGeometry = useSelector((s) => s.drawing.pendingGeometry);
+  const pendingType = useSelector((s) => s.drawing.pendingType);
   const activeCaseIdFromStore = useSelector((s) => s.auth.activeCaseId);
   const match = window.location.pathname.match(/\/map\/(\d+)/);
   const activeCaseId = match ? parseInt(match[1], 10) : activeCaseIdFromStore;
@@ -60,25 +63,29 @@ export function useLayerDrawing() {
         try {
           let backendLayerId = selectedLayer?.backendId ?? null;
 
-          const geometryForBackend = { ...geometrySnapshot };
+          let geometryForBackend = { ...geometrySnapshot };
           let center = undefined;
           let radius = undefined;
           const isCircle = typeSnapshot === "circle";
 
-          if (geometryForBackend.center) {
-            if (isCircle) {
-              center = {
-                lat: parseFloat(geometryForBackend.center.lat),
-                lng: parseFloat(geometryForBackend.center.lng),
-              };
+          if (isCircle) {
+            center = {
+              lat: parseFloat(geometrySnapshot.center.lat),
+              lng: parseFloat(geometrySnapshot.center.lng),
+            };
+            radius = parseFloat(geometrySnapshot.radius);
+
+            // Generate geodesic polygon coordinates using turf
+            const centerLngLat = [center.lng, center.lat];
+            const turfCircle = turf.circle(centerLngLat, radius, { units: 'meters', steps: 64 });
+            geometryForBackend = turfCircle.geometry;
+          } else {
+            if (geometryForBackend.center) {
+              delete geometryForBackend.center;
             }
-            delete geometryForBackend.center;
-          }
-          if (geometryForBackend.radius) {
-            if (isCircle) {
-              radius = parseFloat(geometryForBackend.radius);
+            if (geometryForBackend.radius) {
+              delete geometryForBackend.radius;
             }
-            delete geometryForBackend.radius;
           }
 
           // Resolve case ID dynamically at the moment of saving the shape
@@ -92,9 +99,11 @@ export function useLayerDrawing() {
             case_id: resolvedCaseId,
             created_by: 1,
             geometry: geometryForBackend,
-            geometry_type: typeSnapshot
-              ? typeSnapshot.charAt(0).toUpperCase() + typeSnapshot.slice(1)
-              : "Polygon",
+            geometry_type: isCircle
+              ? "Polygon"
+              : (typeSnapshot
+                ? typeSnapshot.charAt(0).toUpperCase() + typeSnapshot.slice(1)
+                : "Polygon"),
             properties: { name, type: typeSnapshot, color, category, radius, center },
             ...(center && { center }),
             ...(radius && { radius }),
@@ -102,7 +111,15 @@ export function useLayerDrawing() {
 
           // 2. Only if successful, confirm and add feature to local state (drawing it)
           dispatch(
-            confirmSaveShape({ name, category, color, preFeatureLocalId, preLayerLocalId })
+            confirmSaveShape({
+              name,
+              category,
+              color,
+              preFeatureLocalId,
+              preLayerLocalId,
+              geometry: geometrySnapshot,
+              type: typeSnapshot,
+            })
           );
 
           if (!backendLayerId && featureRes.layer_id) {
