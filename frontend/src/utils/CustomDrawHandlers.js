@@ -84,6 +84,26 @@ export class TwoPointPolyline extends L.Draw.Polyline {
 }
 
 export class CircleWithRadiusLine extends L.Draw.Circle {
+  _onMouseDown(e) {
+    if (!this._isDrawing) {
+      this._isDrawing = true;
+      this._startLatLng = e.latlng;
+      L.DomEvent.preventDefault(e.originalEvent);
+    } else {
+      if (this._shape) {
+        this._fireCreatedEvent();
+      }
+      this.disable();
+      if (this.options.repeatMode) {
+        this.enable();
+      }
+    }
+  }
+
+  _onMouseUp() {
+    // No-op: we handle finishing the shape on the second mousedown/click instead of mouseup
+  }
+
   _onMouseMove(e) {
     super._onMouseMove(e);
     if (this._enabled && this._startLatLng) {

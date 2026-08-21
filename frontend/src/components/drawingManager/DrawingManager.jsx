@@ -60,10 +60,19 @@ export default function DrawingManager({ onColorChange }) {
       changeActiveTool("select");
     };
 
+    const handleDrawStop = () => {
+      // If drawing was cancelled/stopped and we're still in a drawing state, reset activeTool to "select"
+      if (activeToolRef.current !== "select") {
+        changeActiveTool("select");
+      }
+    };
+
     leafletMap.on(L.Draw.Event.CREATED, handleCreated);
+    leafletMap.on(L.Draw.Event.DRAWSTOP, handleDrawStop);
 
     return () => {
       leafletMap.off(L.Draw.Event.CREATED, handleCreated);
+      leafletMap.off(L.Draw.Event.DRAWSTOP, handleDrawStop);
     };
   }, [leafletMap]);
 
