@@ -143,6 +143,11 @@ export default function DataActions() {
     dispatch(setActiveVectorOp(nextOp));
   };
 
+  const handleCancel = () => {
+    setActiveOp(null);
+    dispatch(setActiveVectorOp(null));
+  };
+
   return (
     <div className="space-y-3">
       {/* Title */}
@@ -157,8 +162,7 @@ export default function DataActions() {
             const nextOpen = !isOpen;
             setIsOpen(nextOpen);
             if (!nextOpen) {
-              setActiveOp(null);
-              dispatch(setActiveVectorOp(null));
+              handleCancel();
             }
           }}
           className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
@@ -210,25 +214,25 @@ export default function DataActions() {
 
             {/* Render selected operation sub-component */}
             {activeOp === "union" && (
-              <UnionAction onCancel={() => setActiveOp(null)} />
+              <UnionAction onCancel={handleCancel} />
             )}
             {activeOp === "intersection" && (
-              <IntersectionAction onCancel={() => setActiveOp(null)} />
+              <IntersectionAction onCancel={handleCancel} />
             )}
             {activeOp === "difference" && (
-              <DifferenceAction onCancel={() => setActiveOp(null)} />
+              <DifferenceAction onCancel={handleCancel} />
             )}
             {activeOp === "buffer" && (
-              <BufferAction onCancel={() => setActiveOp(null)} />
+              <BufferAction onCancel={handleCancel} />
             )}
             {activeOp === "symmetricDifference" && (
-              <SymmetricDifferenceAction onCancel={() => setActiveOp(null)} />
+              <SymmetricDifferenceAction onCancel={handleCancel} />
             )}
             {activeOp === "centroid" && (
-              <CentroidAction onCancel={() => setActiveOp(null)} />
+              <CentroidAction onCancel={handleCancel} />
             )}
             {activeOp === "convexHull" && (
-              <ConvexHullAction onCancel={() => setActiveOp(null)} />
+              <ConvexHullAction onCancel={handleCancel} />
             )}
           </div>
         )}

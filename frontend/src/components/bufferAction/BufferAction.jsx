@@ -85,6 +85,7 @@ export default function BufferAction({ onCancel }) {
         items={items}
         placeholder="— select feature —"
         disabled={loading}
+        allowedTypes={["point", "polyline", "polygon", "rectangle", "circle"]}
       />
 
       <div>

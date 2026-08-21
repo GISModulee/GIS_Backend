@@ -78,7 +78,7 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
           opacity: 1,
           fillColor: isVectorSelected ? "#eab308" : (isSelected ? "#ff0000" : colorVal),
           fillOpacity: isVectorSelected ? 0.35 : (isPoint ? (isHovered ? 0.95 : (isSelected ? 0.85 : 0.8)) : (isHovered ? 0.6 : (isSelected ? 0.35 : 0.15))),
-          ...(isPoint ? { radius: 6 } : {})
+          ...(isPoint ? { radius: isVectorSelected ? 9 : 6 } : {})
         };
 
         if (featureRefs.current[feature.localId]) {
@@ -109,7 +109,10 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
               if (activeVectorOpRef.current) {
                 const type = (currentFeature.type || "").toLowerCase();
                 const isPolygonOrCircle = type === "polygon" || type === "rectangle" || type === "circle" || currentFeature.geometry_type === "Circle";
-                if (isPolygonOrCircle) {
+                const isPointOrLine = type === "point" || type === "polyline" || type === "line" || type === "linestring";
+                const isSelectable = isPolygonOrCircle || (isPointOrLine && activeVectorOpRef.current === "buffer");
+
+                if (isSelectable) {
                   const isMultiSelect = ["union", "intersection", "difference", "symmetricDifference", "convexHull"].includes(activeVectorOpRef.current);
                   if (isMultiSelect) {
                     dispatch(toggleVectorSel(currentFeature.localId));
