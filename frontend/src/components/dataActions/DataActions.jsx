@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useDispatch } from "react-redux";
+import { setActiveVectorOp } from "@/state/layersSlice.js";
 import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import UnionAction from "../unionAction/UnionAction.jsx";
 import IntersectionAction from "../intersectionAction/IntersectionAction.jsx";
@@ -9,6 +11,7 @@ import ConvexHullAction from "../convexHullAction/ConvexHullAction.jsx";
 import SymmetricDifferenceAction from "../symmetricDifferenceAction/SymmetricDifferenceAction.jsx";
 
 export default function DataActions() {
+  const dispatch = useDispatch();
   const [isOpen, setIsOpen] = useState(false);
   const [activeOp, setActiveOp] = useState(null);
 
@@ -135,7 +138,9 @@ export default function DataActions() {
   ];
 
   const handleSelectOp = (opId) => {
-    setActiveOp(activeOp === opId ? null : opId);
+    const nextOp = activeOp === opId ? null : opId;
+    setActiveOp(nextOp);
+    dispatch(setActiveVectorOp(nextOp));
   };
 
   return (
@@ -148,7 +153,14 @@ export default function DataActions() {
       <div className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm transition-colors duration-200 relative">
         {/* Header Toggle */}
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => {
+            const nextOpen = !isOpen;
+            setIsOpen(nextOpen);
+            if (!nextOpen) {
+              setActiveOp(null);
+              dispatch(setActiveVectorOp(null));
+            }
+          }}
           className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
         >
           <div className="flex items-center gap-3">

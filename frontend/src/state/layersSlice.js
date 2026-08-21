@@ -65,9 +65,28 @@ const layersSlice = createSlice({
     selectedFeatureId: null,
     hoveredFeatureId: null,
     backendGeoJson: null,
+    activeVectorOp: null,       // ← holds the active vector operation id
+    vectorSel: [],              // ← list of selected localIds for vector op
   },
 
   reducers: {
+    setActiveVectorOp(state, action) {
+      state.activeVectorOp = action.payload;
+      state.vectorSel = []; // Reset selection on change
+    },
+    setVectorSel(state, action) {
+      state.vectorSel = action.payload;
+    },
+    toggleVectorSel(state, action) {
+      const localId = action.payload;
+      const index = state.vectorSel.indexOf(localId);
+      if (index > -1) {
+        state.vectorSel = state.vectorSel.filter(id => id !== localId);
+      } else {
+        state.vectorSel = [...state.vectorSel, localId];
+      }
+    },
+
     // ── Backend hydration ────────────────────────────────
 
     // Called on app load — replaces items with backend data
@@ -331,6 +350,7 @@ export const {
   addFeature, addFeaturesBatch, updateFeature, deleteFeature,
   toggleFeatureVisible, moveFeature,
   setBackendGeoJson, clearBackendGeoJson,
+  setActiveVectorOp, setVectorSel, toggleVectorSel,
 } = layersSlice.actions;
 
 export default layersSlice.reducer;

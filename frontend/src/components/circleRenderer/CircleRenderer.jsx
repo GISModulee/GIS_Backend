@@ -1,10 +1,10 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMap as useLeafletMap } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import L from "leaflet";
 import * as turf from "@turf/turf";
 import { useLayers } from "@/hooks/useLayers.js";
-import { selectFeature } from "@/state/layersSlice.js";
+import { selectFeature, setVectorSel, toggleVectorSel } from "@/state/layersSlice.js";
 import { openCommentModal } from "@/state/drawingSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
 import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
@@ -15,6 +15,16 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
   const { items } = useLayers();
   const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
+  const activeVectorOp = useSelector((s) => s.layers.activeVectorOp);
+  const vectorSel = useSelector((s) => s.layers.vectorSel) || [];
+
+  const activeVectorOpRef = useRef(activeVectorOp);
+  const vectorSelRef = useRef(vectorSel);
+
+  useEffect(() => {
+    activeVectorOpRef.current = activeVectorOp;
+    vectorSelRef.current = vectorSel;
+  }, [activeVectorOp, vectorSel]);
 
 
 
@@ -37,13 +47,16 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         const isSelected = isFeatureSelected || isLayerSelected;
 
 
+        const isVectorSelected = activeVectorOp && vectorSel.includes(feature.localId);
+
         const shouldShow = layer.visible && feature.visible;
 
         const style = {
-          color: isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb"),
-          weight: isSelected ? 5 : 2,
+          color: isVectorSelected ? "#eab308" : (isSelected ? "#ff0000" : (feature.color || layer.color || "#2563eb")),
+          weight: isVectorSelected ? 6 : (isSelected ? 5 : 2),
+          dashArray: isVectorSelected ? "5, 5" : undefined,
           opacity: 1,
-          fillOpacity: isSelected ? 0.35 : 0.15,
+          fillOpacity: isVectorSelected ? 0.35 : (isSelected ? 0.35 : 0.15),
         };
 
         // Update existing layer
@@ -89,6 +102,17 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
             const latestItems = itemsRef.current;
             const currentLayer = latestItems.find((l) => l.localId === feature.layerLocalId);
             const currentFeature = currentLayer?.features.find((f) => f.localId === feature.localId) || feature;
+
+            if (activeVectorOpRef.current) {
+              const isMultiSelect = ["union", "intersection", "difference", "symmetricDifference", "convexHull"].includes(activeVectorOpRef.current);
+              if (isMultiSelect) {
+                dispatch(toggleVectorSel(currentFeature.localId));
+              } else {
+                const isAlreadySelected = vectorSelRef.current.includes(currentFeature.localId);
+                dispatch(setVectorSel(isAlreadySelected ? [] : [currentFeature.localId]));
+              }
+              return;
+            }
 
             if (activeToolRef.current === "comment") {
               if (currentFeature.backendId) {
@@ -146,7 +170,7 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
         }
       });
     });
-  }, [items, leafletMap, selectedFeatureId, selectedLayerId, featureRefs, itemsRef, activeToolRef, dispatch]);
+  }, [items, leafletMap, selectedFeatureId, selectedLayerId, featureRefs, itemsRef, activeToolRef, activeVectorOp, vectorSel, dispatch]);
 
   return null;
 }

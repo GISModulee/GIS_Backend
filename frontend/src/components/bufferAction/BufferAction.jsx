@@ -1,12 +1,16 @@
 import { useState } from "react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { useLayers } from "@/hooks/useLayers.js";
+import { setVectorSel } from "@/state/layersSlice.js";
 import layerService from "@/utils/layerService.js";
 import toast from "react-hot-toast";
 import FeatureSelector from "../featureSelector/FeatureSelector.jsx";
 
 export default function BufferAction({ onCancel }) {
-  const [featureA, setFeatureA] = useState("");
+  const dispatch = useDispatch();
+  const vectorSel = useSelector((s) => s.layers.vectorSel);
+  const featureA = vectorSel[0] || "";
+  const setFeatureA = (val) => dispatch(setVectorSel(val ? [val] : []));
   const [bufferDistance, setBufferDistance] = useState(100);
   const [resultName, setResultName] = useState("");
   const [loading, setLoading] = useState(false);

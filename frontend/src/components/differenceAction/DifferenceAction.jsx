@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { useLayers } from "@/hooks/useLayers.js";
+import { setVectorSel } from "@/state/layersSlice.js";
 import layerService from "@/utils/layerService.js";
 import toast from "react-hot-toast";
 import FeatureSelector from "../featureSelector/FeatureSelector.jsx";
 
 export default function DifferenceAction({ onCancel }) {
-  const [selectedFeatures, setSelectedFeatures] = useState([]);
+  const dispatch = useDispatch();
+  const selectedFeatures = useSelector((s) => s.layers.vectorSel);
+  const setSelectedFeatures = (vals) => dispatch(setVectorSel(vals));
   const [resultName, setResultName] = useState("");
   const [loading, setLoading] = useState(false);
 

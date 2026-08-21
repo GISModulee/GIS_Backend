@@ -3,7 +3,7 @@ import { useMap as useLeafletMap } from "react-leaflet";
 import { useSelector, useDispatch } from "react-redux";
 import L from "leaflet";
 import { useLayers } from "@/hooks/useLayers.js";
-import { selectFeature, setHoveredFeatureId } from "@/state/layersSlice.js";
+import { selectFeature, setHoveredFeatureId, setVectorSel, toggleVectorSel } from "@/state/layersSlice.js";
 import { openCommentModal } from "@/state/drawingSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
 import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
@@ -15,6 +15,16 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
   const selectedFeatureId = useSelector((s) => s.layers.selectedFeatureId);
   const selectedLayerId = useSelector((s) => s.layers.selectedLayerId);
   const hoveredFeatureId = useSelector((s) => s.layers.hoveredFeatureId);
+  const activeVectorOp = useSelector((s) => s.layers.activeVectorOp);
+  const vectorSel = useSelector((s) => s.layers.vectorSel) || [];
+
+  const activeVectorOpRef = useRef(activeVectorOp);
+  const vectorSelRef = useRef(vectorSel);
+
+  useEffect(() => {
+    activeVectorOpRef.current = activeVectorOp;
+    vectorSelRef.current = vectorSel;
+  }, [activeVectorOp, vectorSel]);
 
   // Initialize a single canvas renderer to group draw calls on the GPU
 
@@ -57,14 +67,17 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
 
         const shouldShow = layer.visible && feature.visible;
 
+        const isVectorSelected = activeVectorOp && vectorSel.includes(feature.localId);
+
         const isPoint = feature.geometry.type === "Point" || feature.geometry.type === "MultiPoint";
         const colorVal = feature.color || layer.color || "#dc2626";
         const style = {
-          color: isSelected ? "#ff0000" : (isPoint ? "#ffffff" : colorVal),
-          weight: isPoint ? (isSelected || isHovered ? 2 : 1) : (isHovered ? 6 : (isSelected ? 5 : 2)),
+          color: isVectorSelected ? "#eab308" : (isSelected ? "#ff0000" : (isPoint ? "#ffffff" : colorVal)),
+          weight: isVectorSelected ? 6 : (isPoint ? (isSelected || isHovered ? 2 : 1) : (isHovered ? 6 : (isSelected ? 5 : 2))),
+          dashArray: isVectorSelected ? "5, 5" : undefined,
           opacity: 1,
-          fillColor: isSelected ? "#ff0000" : colorVal,
-          fillOpacity: isPoint ? (isHovered ? 0.95 : (isSelected ? 0.85 : 0.8)) : (isHovered ? 0.6 : (isSelected ? 0.35 : 0.15)),
+          fillColor: isVectorSelected ? "#eab308" : (isSelected ? "#ff0000" : colorVal),
+          fillOpacity: isVectorSelected ? 0.35 : (isPoint ? (isHovered ? 0.95 : (isSelected ? 0.85 : 0.8)) : (isHovered ? 0.6 : (isSelected ? 0.35 : 0.15))),
           ...(isPoint ? { radius: 6 } : {})
         };
 
@@ -92,6 +105,21 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
               const latestItems = itemsRef.current;
               const currentLayer = latestItems.find((l) => l.localId === feature.layerLocalId);
               const currentFeature = currentLayer?.features.find((f) => f.localId === feature.localId) || feature;
+
+              if (activeVectorOpRef.current) {
+                const type = (currentFeature.type || "").toLowerCase();
+                const isPolygonOrCircle = type === "polygon" || type === "rectangle" || type === "circle" || currentFeature.geometry_type === "Circle";
+                if (isPolygonOrCircle) {
+                  const isMultiSelect = ["union", "intersection", "difference", "symmetricDifference", "convexHull"].includes(activeVectorOpRef.current);
+                  if (isMultiSelect) {
+                    dispatch(toggleVectorSel(currentFeature.localId));
+                  } else {
+                    const isAlreadySelected = vectorSelRef.current.includes(currentFeature.localId);
+                    dispatch(setVectorSel(isAlreadySelected ? [] : [currentFeature.localId]));
+                  }
+                  return;
+                }
+              }
 
               if (activeToolRef.current === "comment") {
                 if (currentFeature.backendId) {
@@ -169,7 +197,7 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
         }
       });
     };
-  }, [items, leafletMap, selectedFeatureId, selectedLayerId, hoveredFeatureId, featureRefs, itemsRef, activeToolRef, dispatch]);
+  }, [items, leafletMap, selectedFeatureId, selectedLayerId, hoveredFeatureId, featureRefs, itemsRef, activeToolRef, activeVectorOp, vectorSel, dispatch]);
 
   return null;
 }
