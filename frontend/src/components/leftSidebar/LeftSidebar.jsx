@@ -8,7 +8,6 @@ import DataSourceCard from "../dataSourceCard/DataSourceCard";
 import UploadData from "../uploadData/UploadData.jsx";
 import AddImageButton from "../addImageButton/AddImageButton.jsx";
 import LayerPanel from "../layerPanel/LayerPanel.jsx";
-import DataActions from "../dataActions/DataActions.jsx";
 import FetchNewsModal from "../fetchNewsModal/FetchNewsModal.jsx";
 
 // ── Main sidebar ──────────────────────────────────────────
@@ -45,9 +44,6 @@ export default function LeftSidebar({ isOpen, onClose }) {
 
           {/* Layer panel */}
           <LayerPanel />
-
-          {/* Data Actions Section */}
-          <DataActions />
         </div>
 
         <div className="border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-950 p-4">

@@ -10,7 +10,7 @@ import CentroidAction from "../centroidAction/CentroidAction.jsx";
 import ConvexHullAction from "../convexHullAction/ConvexHullAction.jsx";
 import SymmetricDifferenceAction from "../symmetricDifferenceAction/SymmetricDifferenceAction.jsx";
 
-export default function DataActions() {
+export default function DataActions({ isTabMode = false }) {
   const dispatch = useDispatch();
   const [isOpen, setIsOpen] = useState(false);
   const [activeOp, setActiveOp] = useState(null);
@@ -148,6 +148,60 @@ export default function DataActions() {
     dispatch(setActiveVectorOp(null));
   };
 
+  if (isTabMode) {
+    return (
+      <div className="p-3 bg-white dark:bg-gray-900 space-y-3 max-h-[380px] overflow-y-auto">
+        <h4 className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider px-0.5">
+          Vector Operations
+        </h4>
+        <div className="grid grid-cols-4 gap-1.5 w-full">
+          {vectorOperations.map((op) => {
+            const isActive = activeOp === op.id;
+            return (
+              <button
+                key={op.id}
+                onClick={() => handleSelectOp(op.id)}
+                title={op.name}
+                className={`group relative flex items-center justify-center p-2 rounded-lg border transition-all duration-200
+                  ${isActive
+                    ? "border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm"
+                    : "border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-sm"
+                  }`}
+              >
+                <div className="transform group-hover:scale-110 transition-transform duration-200">
+                  {op.icon}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Render selected operation sub-component */}
+        {activeOp === "union" && (
+          <UnionAction onCancel={handleCancel} />
+        )}
+        {activeOp === "intersection" && (
+          <IntersectionAction onCancel={handleCancel} />
+        )}
+        {activeOp === "difference" && (
+          <DifferenceAction onCancel={handleCancel} />
+        )}
+        {activeOp === "buffer" && (
+          <BufferAction onCancel={handleCancel} />
+        )}
+        {activeOp === "symmetricDifference" && (
+          <SymmetricDifferenceAction onCancel={handleCancel} />
+        )}
+        {activeOp === "centroid" && (
+          <CentroidAction onCancel={handleCancel} />
+        )}
+        {activeOp === "convexHull" && (
+          <ConvexHullAction onCancel={handleCancel} />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {/* Title */}
@@ -190,6 +244,7 @@ export default function DataActions() {
                   <button
                     key={op.id}
                     onClick={() => handleSelectOp(op.id)}
+                    title={op.name}
                     className={`group relative flex items-center justify-center p-2 rounded-lg border transition-all duration-200
                       ${isActive
                         ? "border-blue-500 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm"
@@ -198,14 +253,6 @@ export default function DataActions() {
                   >
                     <div className="transform group-hover:scale-110 transition-transform duration-200">
                       {op.icon}
-                    </div>
-
-                    {/* Hover Tooltip */}
-                    <div className="absolute bottom-full mb-1.5 hidden group-hover:flex flex-col items-center z-30 animate-in fade-in zoom-in-95 duration-100 pointer-events-none">
-                      <span className="relative z-10 px-2 py-1 text-[10px] text-white whitespace-nowrap bg-gray-900 dark:bg-gray-800 rounded shadow-md font-semibold border border-gray-800 dark:border-gray-700">
-                        {op.name}
-                      </span>
-                      <div className="w-1.5 h-1.5 -mt-1 rotate-45 bg-gray-900 dark:bg-gray-800 border-r border-b border-gray-800 dark:border-gray-700"></div>
                     </div>
                   </button>
                 );
