@@ -8,6 +8,7 @@ import { selectFeature, setVectorSel, toggleVectorSel } from "@/state/layersSlic
 import { openCommentModal } from "@/state/drawingSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
 import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
+import { shiftGeometry } from "@/utils/InfinityMapUtils.js";
 
 export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef }) {
   const leafletMap = useLeafletMap();
@@ -86,9 +87,19 @@ export default function CircleRenderer({ featureRefs, itemsRef, activeToolRef })
 
         if (centerLatLng && radius != null) {
           const center = [centerLatLng[1], centerLatLng[0]]; // Turf expects [lng, lat]
-          const turfCircle = turf.circle(center, radius, { units: 'meters', steps: 64 });
+          const centerLeft = [center[0] - 360, center[1]];
+          const centerRight = [center[0] + 360, center[1]];
 
-          const leafletLayer = L.geoJSON(turfCircle, {
+          const circleCenter = turf.circle(center, radius, { units: 'meters', steps: 64 });
+          const circleLeft = turf.circle(centerLeft, radius, { units: 'meters', steps: 64 });
+          const circleRight = turf.circle(centerRight, radius, { units: 'meters', steps: 64 });
+
+          const geojson = {
+            type: "FeatureCollection",
+            features: [circleCenter, circleLeft, circleRight]
+          };
+
+          const leafletLayer = L.geoJSON(geojson, {
             style,
             interactive: true,
           });

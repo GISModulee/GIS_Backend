@@ -12,6 +12,7 @@ import CursorWebSocket from "../cursorWebSocket/CursorWebSocket.jsx";
 import { useParams } from "react-router-dom";
 import { useState, useEffect } from "react";
 import L from "leaflet";
+import { replicateGeoJsonForInfinity } from "@/utils/InfinityMapUtils.js";
 
 function TileLayerSwitcher() {
   const { basemapId } = useMap();
@@ -144,19 +145,22 @@ export default function MapView({ sidebarOpen }) {
         {/* Render computed results layers from Turf */}
         {resultLayers
           .filter((r) => r.visible)
-          .map((r) => (
-            <GeoJSON
-              key={r.id}
-              data={r.geojson}
-              style={{
-                color: r.color,
-                fillColor: r.color,
-                fillOpacity: 0.25,
-                weight: 2.5,
-                dashArray: "6 4", // dashed = "this is a computed result"
-              }}
-            />
-          ))}
+          .map((r) => {
+            const replicatedGeoJson = replicateGeoJsonForInfinity(r.geojson);
+            return (
+              <GeoJSON
+                key={r.id}
+                data={replicatedGeoJson}
+                style={{
+                  color: r.color,
+                  fillColor: r.color,
+                  fillOpacity: 0.25,
+                  weight: 2.5,
+                  dashArray: "6 4", // dashed = "this is a computed result"
+                }}
+              />
+            );
+          })}
       </MapContainer>
     </div>
   );

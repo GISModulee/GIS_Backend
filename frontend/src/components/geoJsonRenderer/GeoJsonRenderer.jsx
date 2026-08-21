@@ -7,6 +7,7 @@ import { selectFeature, setHoveredFeatureId, setVectorSel, toggleVectorSel } fro
 import { openCommentModal } from "@/state/drawingSlice.js";
 import { calculateRoughArea } from "@/utils/AreaUtils.js";
 import { buildTooltipHTML } from "@/utils/TooltipUtils.js";
+import { shiftGeometry } from "@/utils/InfinityMapUtils.js";
 
 export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }) {
   const leafletMap = useLeafletMap();
@@ -94,7 +95,19 @@ export default function GeoJsonRenderer({ featureRefs, itemsRef, activeToolRef }
           return;
         }
 
-        const geojson = { type: "Feature", geometry: feature.geometry, properties: {} };
+        const geomLeft = shiftGeometry(feature.geometry, -360);
+        const geomRight = shiftGeometry(feature.geometry, 360);
+        const features = [
+          { type: "Feature", geometry: feature.geometry, properties: {} }
+        ];
+        if (geomLeft) {
+          features.push({ type: "Feature", geometry: geomLeft, properties: {} });
+        }
+        if (geomRight) {
+          features.push({ type: "Feature", geometry: geomRight, properties: {} });
+        }
+        const geojson = { type: "FeatureCollection", features };
+
         const leafletLayer = L.geoJSON(geojson, {
           style,
           onEachFeature: (_f, lyr) => {

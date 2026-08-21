@@ -5,6 +5,7 @@ import { useMap } from "react-leaflet";
 import L from "leaflet";
 import { Loader2 } from "lucide-react";
 import { useBoundary } from "@/hooks/useBoundary";
+import { replicateGeoJsonForInfinity } from "@/utils/InfinityMapUtils.js";
 
 const BOUNDARY_STYLE = {
   color: "#368fe2",
@@ -44,13 +45,14 @@ export default function BoundaryLayer({
 
     if (!geojson) return;
 
-    const layer = L.geoJSON(geojson, {
+    const replicatedGeoJson = replicateGeoJsonForInfinity(geojson);
+    const layer = L.geoJSON(replicatedGeoJson, {
       style: BOUNDARY_STYLE,
     }).addTo(map);
 
     layerRef.current = layer;
 
-    const bounds = layer.getBounds();
+    const bounds = L.geoJSON(geojson).getBounds();
 
     if (bounds.isValid()) {
       map.fitBounds(bounds, {
