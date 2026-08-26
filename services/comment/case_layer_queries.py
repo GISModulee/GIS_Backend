@@ -1,6 +1,6 @@
 from fastapi import UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
@@ -91,21 +91,36 @@ def get_layer_comments(case_id: int, layer_id: int, db):
             )
             raise NotFoundError(CASE_NOT_FOUND)
 
-        comments = db.scalars(
-            select(Comment)
+        reply_counts = (
+            select(
+                Comment.root_comment_id.label("root_comment_id"),
+                func.count(Comment.id).label("reply_count"),
+            )
+            .where(Comment.root_comment_id.is_not(None))
+            .group_by(Comment.root_comment_id)
+            .subquery()
+        )
+
+        rows = db.execute(
+            select(
+                Comment,
+                func.coalesce(reply_counts.c.reply_count, 0).label("reply_count"),
+            )
+            .outerjoin(reply_counts, reply_counts.c.root_comment_id == Comment.id)
             .where(
                 Comment.case_id == case_id,
                 Comment.layer_id == layer_id,
+                Comment.parent_comment_id.is_(None),
             )
-            .order_by(
-                Comment.created_at.desc()
-            )
+            .order_by(Comment.created_at.desc())
         ).all()
 
-        return [
-            _comment_to_dict(comment)
-            for comment in comments
-        ]
+        comments = []
+        for comment, reply_count in rows:
+            item = _comment_to_dict(comment)
+            item["reply_count"] = reply_count
+            comments.append(item)
+        return comments
 
     except NotFoundError:
         raise

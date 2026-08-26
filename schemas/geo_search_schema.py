@@ -97,3 +97,64 @@ class GeoSearchResponse(BaseModel):
     area: dict
     sources: dict[str, SourceStatus]
     items: list[NewsItem]
+
+
+class NewsCommentRequest(BaseModel):
+    case_id: int = Field(..., gt=0)
+    layer_id: int = Field(..., gt=0)
+    feature_number: int = Field(..., gt=0)
+    title: str = Field(..., min_length=1, max_length=300)
+    url: str = Field(..., min_length=1, max_length=2000)
+    source: str = Field(..., min_length=1, max_length=120)
+    provider: str | None = Field(default=None, max_length=80)
+    summary: str | None = Field(default=None, max_length=2000)
+    published_at: datetime | None = None
+    keywords: list[str] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_news_comment(self):
+        self.title = self.title.strip()
+        self.url = self.url.strip()
+        self.source = self.source.strip()
+        if not self.title:
+            raise ValueError("title cannot be blank")
+        if not self.url:
+            raise ValueError("url cannot be blank")
+        if not self.source:
+            raise ValueError("source cannot be blank")
+        if self.provider is not None:
+            self.provider = self.provider.strip() or None
+        if self.summary is not None:
+            self.summary = self.summary.strip() or None
+
+        cleaned_keywords = []
+        seen = set()
+        for keyword in self.keywords:
+            keyword = keyword.strip()
+            if not keyword:
+                continue
+            key = keyword.casefold()
+            if key not in seen:
+                seen.add(key)
+                cleaned_keywords.append(keyword)
+        self.keywords = cleaned_keywords
+        return self
+
+
+class GeoNewsSearchHistoryItem(BaseModel):
+    id: int
+    case_id: int
+    layer_id: int
+    feature_number: int
+    feature_name: str
+    keywords: list[str]
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    max_results: int
+    created_at: datetime | None = None
+
+
+class GeoNewsSearchHistoryClearResponse(BaseModel):
+    success: bool
+    deleted_count: int
+    message: str

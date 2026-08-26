@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database.database import get_db
 from services.comment.comment_service import (
     get_comment_attachment,
+    get_comment_replies,
     get_case_comments,
     get_feature_comment_thread,
     get_feature_comments,
@@ -62,6 +63,27 @@ def list_feature_comment_thread(
     )
 
     return get_feature_comment_thread(case_id, layer_id, feature_number, db)
+
+
+@router.get(
+    "/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}/replies",
+    response_model=list[CommentResponse],
+)
+def list_comment_replies(
+    case_id: int,
+    layer_id: int,
+    feature_number: int,
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+
+    logger.info(
+        f"GET /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}/replies | "
+        f"user_id={current_user['user_id']}"
+    )
+
+    return get_comment_replies(case_id, layer_id, feature_number, comment_id, db)
 
  
 @router.get("/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}/attachment")

@@ -36,6 +36,15 @@ class ReplyCreateResponse(BaseModel):
 
 
 # ===================================================
+# DELETE COMMENT
+# ===================================================
+
+class CommentDeleteResponse(BaseModel):
+    success: bool
+    message: str
+
+
+# ===================================================
 # COMMENT RESPONSE (full detail — used by case/layer comment lists)
 # ===================================================
 
@@ -43,6 +52,8 @@ class CommentResponse(BaseModel):
     id: int
     case_id: int
     user_id: int
+    parent_comment_id: int | None = None
+    root_comment_id: int | None = None
     comment: str
     has_attachment: bool
     attachment_filename: str | None = None
@@ -54,6 +65,7 @@ class CommentResponse(BaseModel):
     user_full_name: str | None = None
     user_username: str | None = None
     user_role: str | None = None
+    reply_count: int | None = None
 
 
 # ===================================================
@@ -71,6 +83,8 @@ class CommentIdResponse(BaseModel):
 class CommentThreadResponse(BaseModel):
     id: int
     user_id: int
+    parent_comment_id: int | None = None
+    root_comment_id: int | None = None
     comment: str
     has_attachment: bool
     attachment_filename: str | None = None

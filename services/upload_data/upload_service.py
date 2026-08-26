@@ -8,6 +8,7 @@ from services.upload_data.storage import UPLOAD_FOLDER, _sanitize_filename
 from services.feature.feature_websocket_manager import feature_connection_manager
 from utils.constants import UPLOAD_TYPE_UNSUPPORTED_TEMPLATE
 from utils.exceptions import UnsupportedMediaTypeError
+from utils.logger import logger
 
 CHUNK_SIZE = 2000
 
@@ -49,30 +50,50 @@ async def process_upload(
     created_by: int | None = None,
 ):
 
+    extension = os.path.splitext(file.filename or "")[1].lstrip(".").lower()
+    extractor = EXTRACTOR_REGISTRY.get(extension)
+    if extractor is None:
+        raise UnsupportedMediaTypeError(UPLOAD_TYPE_UNSUPPORTED_TEMPLATE.format(extension=extension))
+
     safe_name = _sanitize_filename(file.filename)
     file_path = os.path.join(UPLOAD_FOLDER, safe_name)
 
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
-    extension = file.filename.split(".")[-1].lower()
-
-    extractor = EXTRACTOR_REGISTRY.get(extension)
-    if extractor is None:
-        raise UnsupportedMediaTypeError(UPLOAD_TYPE_UNSUPPORTED_TEMPLATE.format(extension=extension))
-
-    data = await run_in_threadpool(
-        extractor.extract,
-        file_path=file_path,
-        filename=file.filename,
-        case_id=case_id,
-        layer_name=layer_name,
-        created_by=created_by,
-        db=db,
-    )
+    try:
+        data = await run_in_threadpool(
+            extractor.extract,
+            file_path=file_path,
+            filename=file.filename,
+            case_id=case_id,
+            layer_name=layer_name,
+            created_by=created_by,
+            db=db,
+        )
+    except Exception:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except OSError as cleanup_error:
+            logger.warning(
+                "Failed to clean up upload file after extraction error | path=%s | error=%s",
+                file_path,
+                cleanup_error,
+            )
+        raise
 
     if data.get("status") == "imported" and data.get("created_features"):
-        await _broadcast_batch_created(case_id, data["layer_id"], data["created_features"])
+        try:
+            await _broadcast_batch_created(case_id, data["layer_id"], data["created_features"])
+        except Exception as broadcast_error:
+            logger.exception(
+                "Feature batch WebSocket broadcast failed after upload import | "
+                "case_id=%s | layer_id=%s | error=%s",
+                case_id,
+                data["layer_id"],
+                broadcast_error,
+            )
 
     return {
         "success": True,

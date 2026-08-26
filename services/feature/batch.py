@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 
 from geoalchemy2 import Geography, Geometry
-from sqlalchemy import cast, exists, func, insert, select
+from sqlalchemy import cast, exists, func, insert, literal, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
 from models.model import Comment, Feature, Layer, Case, Comment
@@ -62,6 +62,23 @@ def create_features_batch(features: list, case_id: int, layer_id: int, db, creat
         name, geometry (GeoJSON dict), geometry_type, properties
     Circles aren't supported in this batch path (uploads don't produce
     them) - only Polygon/LineString/Point geometries from parsed files.
+
+    created_features example:
+        {
+            "id": 1,
+            "feature_number": 1,
+            "case_id": 1,
+            "layer_id": 2,
+            "name": "Feature name",
+            "geometry_type": "Point",
+            "radius": None,
+            "geometry": {"type": "Point", "coordinates": [73.8567, 18.5204]},
+            "properties": {"name": "Feature name"},
+            "created_by": 5,
+            "created_at": "2026-08-26T10:30:00",
+            "updated_at": "2026-08-26T10:30:00",
+            "has_comments": False,
+        }
     """
 
     logger.info(
@@ -128,12 +145,29 @@ def create_features_batch(features: list, case_id: int, layer_id: int, db, creat
         result = db.execute(
             insert(Feature)
             .values(feature_rows)
-            .returning(Feature.id)
+            .returning(
+                Feature.id,
+                Feature.feature_number,
+                Feature.case_id,
+                Feature.layer_id,
+                Feature.name,
+                Feature.geometry_type,
+                Feature.radius,
+                func.ST_AsGeoJSON(Feature.geom).label("geometry"),
+                Feature.properties,
+                Feature.created_by,
+                Feature.created_at,
+                Feature.updated_at,
+                literal(False).label("has_comments"),
+            )
         )
-        inserted_feature_ids = result.scalars().all()
+        created_feature_dicts = [
+            _run_completed_coroutine(_row_to_feature_dict(row))
+            for row in result
+        ]
         insert_elapsed = time.monotonic() - insert_start
         logger.info(
-            f"Bulk feature insert returned ids | count={len(inserted_feature_ids)} | "
+            f"Bulk feature insert returned created features | count={len(created_feature_dicts)} | "
             f"case_id={case_id} | layer_id={layer_id} | elapsed={insert_elapsed:.3f}s"
         )
 
@@ -141,7 +175,7 @@ def create_features_batch(features: list, case_id: int, layer_id: int, db, creat
         db.commit()
         commit_elapsed = time.monotonic() - commit_start
         logger.info(
-            f"Bulk feature commit completed | count={len(inserted_feature_ids)} | "
+            f"Bulk feature commit completed | count={len(created_feature_dicts)} | "
             f"case_id={case_id} | layer_id={layer_id} | elapsed={commit_elapsed:.3f}s"
         )
 
@@ -164,24 +198,7 @@ def create_features_batch(features: list, case_id: int, layer_id: int, db, creat
         logger.error(f"Unexpected DB error batch creating features | layer_id={layer_id} | error={e}", exc_info=True)
         raise ServiceUnavailableError(FEATURE_CREATE_FAILED) from e
 
-    select_start = time.monotonic()
-    feature_select = _run_completed_coroutine(_feature_select())
-    result = db.execute(
-        feature_select
-        .where(Feature.id.in_(inserted_feature_ids))
-        .order_by(Feature.id)
-    )
-    created_feature_dicts = [
-        _run_completed_coroutine(_row_to_feature_dict(row))
-        for row in result
-    ]
-    select_elapsed = time.monotonic() - select_start
     total_elapsed = time.monotonic() - batch_start
-
-    logger.info(
-        f"Bulk feature result retrieval completed | count={len(created_feature_dicts)} | "
-        f"case_id={case_id} | layer_id={layer_id} | elapsed={select_elapsed:.3f}s"
-    )
 
     logger.info(
         f"Batch created {len(created_feature_dicts)} features | "

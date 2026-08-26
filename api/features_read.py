@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from database.database import get_db
@@ -7,7 +7,7 @@ from services.feature.feature_service import (
     get_case_features,
     get_feature_by_number,
     get_features,
-    get_layer_features,
+    get_layer_features_chunk,
 )
 from services.layer.layer_service import get_layer
 from utils.constants import FEATURE_NOT_FOUND, LAYER_NOT_FOUND
@@ -58,11 +58,17 @@ async def get_single_feature(
 async def list_layer_features(
     case_id: int,
     layer_id: int,
+    response: Response,
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
 
-    logger.info(f"GET /cases/{case_id}/layers/{layer_id}/features | user_id={current_user['user_id']}")
+    logger.info(
+        f"GET /cases/{case_id}/layers/{layer_id}/features | "
+        f"user_id={current_user['user_id']} | limit={limit} | offset={offset}"
+    )
 
     layer = await get_layer(layer_id, db)
 
@@ -70,7 +76,14 @@ async def list_layer_features(
         logger.warning(f"Layer not found | case_id={case_id} | layer_id={layer_id}")
         raise NotFoundError(LAYER_NOT_FOUND)
 
-    return await get_layer_features(layer_id, db)
+    chunk = await get_layer_features_chunk(layer_id, limit, offset, db)
+
+    response.headers["X-Total-Count"] = str(chunk["total"])
+    response.headers["X-Limit"] = str(chunk["limit"])
+    response.headers["X-Offset"] = str(chunk["offset"])
+    response.headers["X-Has-More"] = "true" if chunk["has_more"] else "false"
+
+    return chunk["items"]
 
 
 

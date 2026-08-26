@@ -157,3 +157,49 @@ def get_feature_comment_thread(case_id, layer_id, feature_number, db):
                 parent_node["replies"].append(node)
 
     return roots
+
+
+def get_comment_replies(case_id, layer_id, feature_number, comment_id, db):
+
+    logger.info(
+        f"Fetching flat replies | case_id={case_id} | layer_id={layer_id} | "
+        f"feature_number={feature_number} | comment_id={comment_id}"
+    )
+
+    try:
+        root = db.get(Comment, comment_id)
+        if (
+            root is None
+            or root.case_id != case_id
+            or root.layer_id != layer_id
+            or root.feature_number != feature_number
+            or root.parent_comment_id is not None
+        ):
+            logger.warning(
+                f"Get comment replies failed: root comment not found | case_id={case_id} | "
+                f"layer_id={layer_id} | feature_number={feature_number} | comment_id={comment_id}"
+            )
+            raise NotFoundError(COMMENT_NOT_FOUND)
+
+        replies = db.scalars(
+            select(Comment)
+            .where(
+                Comment.case_id == case_id,
+                Comment.layer_id == layer_id,
+                Comment.feature_number == feature_number,
+                Comment.root_comment_id == comment_id,
+            )
+            .order_by(Comment.created_at.asc())
+        ).all()
+
+        return [_comment_to_dict(reply) for reply in replies]
+
+    except NotFoundError:
+        raise
+
+    except SQLAlchemyError as e:
+        logger.error(
+            f"Failed to fetch comment replies | comment_id={comment_id} | error={e}",
+            exc_info=True,
+        )
+        raise ServiceUnavailableError(COMMENT_FETCH_FAILED) from e

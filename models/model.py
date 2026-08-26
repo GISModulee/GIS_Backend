@@ -164,6 +164,13 @@ class Comment(Base):
         nullable=True
     )
 
+    root_comment_id = Column(
+        Integer,
+        ForeignKey("comments.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True
+    )
+
     user_id = Column(
         Integer,
         ForeignKey("users.id"),
@@ -183,6 +190,7 @@ class Comment(Base):
     replies = relationship(
         "Comment",
         backref=backref("parent", remote_side=[id]),
+        foreign_keys=[parent_comment_id],
         cascade="all, delete-orphan",
         single_parent=True,
     )
@@ -203,3 +211,19 @@ class ImageRecord(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     layer = relationship("Layer", back_populates="images")
+
+
+class GeoNewsSearchHistory(Base):
+    __tablename__ = "geo_news_search_history"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    layer_id = Column(Integer, ForeignKey("layers.id", ondelete="CASCADE"), nullable=False, index=True)
+    feature_number = Column(Integer, nullable=False)
+    feature_name = Column(Text, nullable=False)
+    keywords = Column(JSON, default=list, nullable=False)
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+    max_results = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

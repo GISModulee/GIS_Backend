@@ -34,6 +34,8 @@ def _comment_to_dict(comment):
         "layer_id": comment.layer_id,
         "case_id": comment.case_id,
         "user_id": comment.user_id,
+        "parent_comment_id": comment.parent_comment_id,
+        "root_comment_id": comment.root_comment_id,
         "comment": comment.comment,
         "has_attachment": comment.attachment_filename is not None,
         "attachment_filename": comment.attachment_filename,

@@ -22,11 +22,19 @@ from utils.exceptions import NotFoundError, ServiceUnavailableError
 from services.comment.comment_validator import CommentAttachmentValidator
 from services.comment.serializers import _comment_to_dict
 
-def create_comment(case_id, layer_id, feature_number, user_id, comment, attachment: UploadFile | None = None):
+def create_comment(
+    case_id,
+    layer_id,
+    feature_number,
+    user_id,
+    comment,
+    attachment: UploadFile | None = None,
+    parent_comment_id: int | None = None,
+):
 
     logger.info(
         f"Creating comment | case_id={case_id} | layer_id={layer_id} | feature_number={feature_number} | "
-        f"user_id={user_id} | has_attachment={attachment is not None}"
+        f"parent_comment_id={parent_comment_id} | user_id={user_id} | has_attachment={attachment is not None}"
     )
 
     attachment_data = None
@@ -69,11 +77,32 @@ def create_comment(case_id, layer_id, feature_number, user_id, comment, attachme
                 )
                 raise NotFoundError(LAYER_NOT_FOUND)
 
+            root_comment_id = None
+            if parent_comment_id is not None:
+                parent = db.get(Comment, parent_comment_id)
+                if parent is None:
+                    logger.warning(
+                        f"Create comment failed: parent comment not found | parent_comment_id={parent_comment_id}"
+                    )
+                    raise NotFoundError(COMMENT_NOT_FOUND)
+
+                if parent.feature_id != feature.id:
+                    logger.warning(
+                        f"Create comment failed: parent comment belongs to a different feature | "
+                        f"parent_comment_id={parent_comment_id} | parent_feature_id={parent.feature_id} | "
+                        f"expected_feature_id={feature.id}"
+                    )
+                    raise NotFoundError(COMMENT_NOT_FOUND)
+
+                root_comment_id = parent.root_comment_id or parent.id
+
             new_comment = Comment(
                 feature_id=feature.id,
                 feature_number=feature.feature_number,
                 layer_id=feature.layer_id,
                 case_id=feature.case_id,
+                parent_comment_id=parent_comment_id,
+                root_comment_id=root_comment_id,
                 user_id=user_id,
                 comment=comment,
                 attachment_data=attachment_data,
@@ -91,7 +120,8 @@ def create_comment(case_id, layer_id, feature_number, user_id, comment, attachme
             comment_id = new_comment.id
             full_comment = {
                 "id": new_comment.id,
-                "parent_comment_id": None,
+                "parent_comment_id": new_comment.parent_comment_id,
+                "root_comment_id": new_comment.root_comment_id,
                 "case_id": new_comment.case_id,
                 "layer_id": new_comment.layer_id,
                 "feature_number": new_comment.feature_number,
@@ -124,9 +154,10 @@ def create_comment(case_id, layer_id, feature_number, user_id, comment, attachme
     return {
         "success": True,
         "comment_id": comment_id,
+        "parent_comment_id": parent_comment_id,
         "case_id": case_id,
         "layer_id": layer_id,
         "feature_number": feature_number,
-        "message": "Comment added successfully",
+        "message": "Reply added successfully" if parent_comment_id is not None else "Comment added successfully",
         "comment": full_comment,
     }

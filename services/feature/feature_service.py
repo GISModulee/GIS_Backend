@@ -5,6 +5,7 @@ from services.feature.queries import (
     get_feature,
     get_feature_by_number,
     get_features,
+    get_layer_features_chunk,
     get_layer_features,
 )
 from services.feature.mutations import delete_feature, patch_feature, update_feature
@@ -16,6 +17,7 @@ __all__ = [
     "get_feature",
     "get_feature_by_number",
     "get_features",
+    "get_layer_features_chunk",
     "get_layer_features",
     "delete_feature",
     "patch_feature",
