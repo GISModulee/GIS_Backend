@@ -51,7 +51,18 @@ class GeoJSONExtractor(BaseExtractor):
     # one create_feature call per feature) but parses natively with
     # `json` instead of geopandas, since GeoJSON needs no driver
     # detection.
-    def extract(self, *, file_path, filename, case_id, layer_name, created_by, db):
+    def extract(
+        self,
+        *,
+        file_path,
+        filename,
+        case_id,
+        layer_name,
+        created_by,
+        db,
+        batch_size,
+        on_batch_created=None,
+    ):
 
         case_id = _resolve_case_id(case_id, created_by)
 
@@ -133,13 +144,20 @@ class GeoJSONExtractor(BaseExtractor):
                 name = properties.get("Name") or properties.get("name")
                 yield name, geometry, properties
 
-        created_features = _ingest_features(case_id, layer_id, _geojson_features(), created_by, db)
+        imported_features = _ingest_features(
+            case_id,
+            layer_id,
+            _geojson_features(),
+            created_by,
+            db,
+            batch_size,
+            on_batch_created,
+        )
 
         return {
             "success": True,
             "status": "imported",
             "layer_id": layer_id,
             "layer_name": resolved_layer_name,
-            "imported_features": len(created_features),
-            "created_features": created_features,
+            "imported_features": imported_features,
         }

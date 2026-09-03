@@ -44,9 +44,16 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         logger.warning(f"Validation error on {request.url.path}: {exc.errors()}")
+        detail = DETAIL_VALIDATION_ERROR
+        if request.url.path.startswith("/hotspots"):
+            errors = exc.errors()
+            if errors:
+                detail = errors[0].get("msg", DETAIL_VALIDATION_ERROR)
+                if isinstance(detail, str) and detail.startswith("Value error, "):
+                    detail = detail.removeprefix("Value error, ")
         return await _error_response(
             STATUS_UNPROCESSABLE_ENTITY,
-            DETAIL_VALIDATION_ERROR,
+            detail,
             jsonable_encoder(exc.errors()),
         )
 

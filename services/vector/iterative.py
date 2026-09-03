@@ -65,6 +65,12 @@ async def _iterative_operation(
     result_geom = geometries[0]
 
     for geom in geometries[1:]:
+        if label == "intersection" and not db.scalar(
+            select(func.ST_Intersects(result_geom, geom))
+        ):
+            result_geom = None
+            break
+
         result_geom = db.scalar(
             select(operation(result_geom, geom))
         )

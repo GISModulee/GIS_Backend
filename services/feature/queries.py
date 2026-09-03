@@ -89,6 +89,7 @@ async def get_case_features(case_id, db):
         for row in rows
     ]
 
+
 # ===================================================
 # GET ALL FEATURES
 # ===================================================
@@ -175,53 +176,6 @@ async def get_layer_features(layer_id, db):
         raise ServiceUnavailableError(FEATURES_FETCH_FAILED) from e
 
     return [await _row_to_feature_summary_dict(row) for row in rows]
-
-
-async def get_layer_features_chunk(layer_id, limit, offset, db):
-
-    logger.info(
-        f"Fetching feature chunk for layer | layer_id={layer_id} | limit={limit} | offset={offset}"
-    )
-
-    try:
-        layer_exists = db.scalar(select(Layer.id).where(Layer.id == layer_id))
-        if layer_exists is None:
-            logger.warning(f"Get layer feature chunk failed: layer not found | layer_id={layer_id}")
-            raise NotFoundError(LAYER_NOT_FOUND)
-
-        total = db.scalar(
-            select(func.count()).select_from(Feature).where(Feature.layer_id == layer_id)
-        ) or 0
-
-        result = db.execute(
-            (await _feature_select())
-            .where(Feature.layer_id == layer_id)
-            .order_by(Feature.id)
-            .offset(offset)
-            .limit(limit)
-        )
-        rows = list(result)
-
-    except NotFoundError:
-        raise
-
-    except SQLAlchemyError as e:
-        logger.error(
-            f"Failed to fetch feature chunk for layer | layer_id={layer_id} | "
-            f"limit={limit} | offset={offset} | error={e}",
-            exc_info=True,
-        )
-        raise ServiceUnavailableError(FEATURES_FETCH_FAILED) from e
-
-    features = [await _row_to_feature_summary_dict(row) for row in rows]
-
-    return {
-        "items": features,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "has_more": offset + len(features) < total,
-    }
 
 
 # ===================================================

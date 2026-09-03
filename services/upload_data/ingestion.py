@@ -59,12 +59,22 @@ SUPPORTED_GEOMETRY_TYPES = {
 # advisory lock, ONE feature_number lookup, and ONE commit for the
 # entire file.
 
-def _ingest_features(case_id, layer_id, feature_iter, created_by, db):
+def _ingest_features(
+    case_id,
+    layer_id,
+    feature_iter,
+    created_by,
+    db,
+    batch_size,
+    on_batch_created=None,
+):
     """
     feature_iter yields (name, geometry, properties) tuples for each
-    feature to import. Returns created feature IDs and numbers.
+    feature to import. Features are inserted and optionally broadcast
+    one committed batch at a time.
     """
-    collected = []
+    batch = []
+    total_created = 0
 
     for name, geometry, properties in feature_iter:
 
@@ -83,19 +93,48 @@ def _ingest_features(case_id, layer_id, feature_iter, created_by, db):
 
         geometry = remove_z_coordinates(geometry)
 
-        collected.append({
-            "name": name or f"Feature {len(collected) + 1}",
+        batch.append({
+            "name": name or f"Feature {total_created + len(batch) + 1}",
             "geometry": geometry,
             "geometry_type": geometry_type,
             "properties": properties,
         })
 
+        if len(batch) >= batch_size:
+            total_created += _create_and_emit_batch(
+                batch,
+                case_id,
+                layer_id,
+                db,
+                created_by,
+                on_batch_created,
+            )
+            batch.clear()
+
+    if batch:
+        total_created += _create_and_emit_batch(
+            batch,
+            case_id,
+            layer_id,
+            db,
+            created_by,
+            on_batch_created,
+        )
+        batch.clear()
+
+    return total_created
+
+
+def _create_and_emit_batch(batch, case_id, layer_id, db, created_by, on_batch_created=None):
     created = create_features_batch(
-        collected,
+        list(batch),
         case_id,
         layer_id,
         db,
         created_by,
     )
 
-    return created
+    if created and on_batch_created is not None:
+        on_batch_created(layer_id, created)
+
+    return len(created)

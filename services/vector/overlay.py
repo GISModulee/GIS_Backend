@@ -101,6 +101,15 @@ async def _binary_operation(
     left = aliased(Feature)
     right = aliased(Feature)
 
+    conditions = [
+        left.case_id == case_id,
+        right.case_id == case_id,
+        left.feature_number == feature_numbers[0],
+        right.feature_number == feature_numbers[1],
+    ]
+    if label == "intersection":
+        conditions.append(func.ST_Intersects(left.geom, right.geom))
+
     geometry = await _run_geometry(
         select(
             func.ST_AsGeoJSON(
@@ -109,12 +118,7 @@ async def _binary_operation(
                     right.geom
                 )
             )
-        ).where(
-            left.case_id == case_id,
-            right.case_id == case_id,
-            left.feature_number == feature_numbers[0],
-            right.feature_number == feature_numbers[1],
-        ),
+        ).where(*conditions),
         VECTOR_OPERATION_FAILED_TEMPLATE.format(operation=label),
         db,
     )

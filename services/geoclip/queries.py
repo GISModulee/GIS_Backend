@@ -55,6 +55,7 @@ async def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Sess
         db.query(
             Feature.id,
             Feature.layer_id,
+            Feature.feature_number,
             Feature.name,
             Feature.properties,
             func.ST_AsGeoJSON(Feature.geom).label("geometry_json"),
@@ -78,6 +79,7 @@ async def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Sess
             "type": "Feature",
             "id": row.id,
             "layer_id": row.layer_id,
+            "feature_number": row.feature_number,
             "name": row.name,
             "geometry": geometry,
             "properties": row.properties or {},

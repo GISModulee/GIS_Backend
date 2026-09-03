@@ -98,7 +98,18 @@ class KMLExtractor(BaseExtractor):
     # `layer_name`: optional. If provided, used as-is for the new
     # import layer. If omitted, derives the name from the uploaded
     # file's basename.
-    def extract(self, *, file_path, filename, case_id, layer_name, created_by, db):
+    def extract(
+        self,
+        *,
+        file_path,
+        filename,
+        case_id,
+        layer_name,
+        created_by,
+        db,
+        batch_size,
+        on_batch_created=None,
+    ):
 
         case_id = _resolve_case_id(case_id, created_by)
 
@@ -138,13 +149,20 @@ class KMLExtractor(BaseExtractor):
         if gdf.empty:
             feature_iter = _parse_kml_features(file_path)
 
-        created_features = _ingest_features(case_id, layer_id, feature_iter, created_by, db)
+        imported_features = _ingest_features(
+            case_id,
+            layer_id,
+            feature_iter,
+            created_by,
+            db,
+            batch_size,
+            on_batch_created,
+        )
 
         return {
             "success": True,
             "status": "imported",
             "layer_id": layer_id,
             "layer_name": resolved_layer_name,
-            "imported_features": len(created_features),
-            "created_features": created_features,
+            "imported_features": imported_features,
         }

@@ -51,6 +51,8 @@ async def _run_geometry(statement, error_message, db):
         raise ServiceUnavailableError(error_message) from e
 
     if geometry is None:
+        if error_message == VECTOR_OPERATION_FAILED_TEMPLATE.format(operation="intersection"):
+            raise UnprocessableEntityError("The selected shapes are not intersecting")
         operation_name = error_message.replace(VECTOR_COMPUTE_FAILURE_PREFIX, "").capitalize()
         raise UnprocessableEntityError(
             GEOMETRY_COMPUTE_UNAVAILABLE_TEMPLATE.format(operation=operation_name)

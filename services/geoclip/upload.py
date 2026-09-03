@@ -111,15 +111,16 @@ async def upload_image(
             case_id=case_id,
             layer_id=layer_id,
             name=feature_name,
-            geometry={
-                "type": "Point",
-                "coordinates": [pred["lon"], pred["lat"]],
+            geometry_type="Circle",
+            center={
+                "lat": pred["lat"],
+                "lng": pred["lon"],
             },
-            geometry_type="Point",
+            radius=1000,
             properties={
-                "type": "point",
-                "layerType": "point",
-                "layer_type": "point",
+                "type": "circle",
+                "layerType": "circle",
+                "layer_type": "circle",
                 "category": "GeoCLIP Prediction",
                 "color": "#dc2626",
                 "image_id": file_id,
@@ -128,6 +129,7 @@ async def upload_image(
                 "rank": rank,
                 "lat": pred["lat"],
                 "lon": pred["lon"],
+                "radius": 1000,
                 "score": pred["score"],
             },
         )

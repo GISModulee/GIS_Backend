@@ -9,6 +9,8 @@ class ImageUploadResponse(BaseModel):
     layer_name: str
     filename: str
     predictions_created: int
+    feature_ids: list[int] = []
+    feature_numbers: list[int] = []
     data: Dict[str, Any]
     status: str
 
@@ -33,6 +35,7 @@ class FeatureGeoJSON(BaseModel):
     type: str = "Feature"
     id: int
     layer_id: int
+    feature_number: int
     name: str | None = None
     geometry: Dict[str, Any]  
     properties: Dict[str, Any]

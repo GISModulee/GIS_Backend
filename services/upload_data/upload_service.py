@@ -1,5 +1,6 @@
 import os
 
+import anyio
 from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
@@ -13,33 +14,49 @@ from utils.logger import logger
 CHUNK_SIZE = 2000
 
 
-async def _broadcast_batch_created(case_id: int, layer_id: int, features: list[dict]) -> None:
+async def _broadcast_batch_created(
+    case_id: int,
+    layer_id: int,
+    features: list[dict],
+    chunk_index: int,
+) -> None:
     """
-    Broadcasts newly-imported features in chunks of CHUNK_SIZE so no
-    single WebSocket frame carries an unbounded number of features.
-    Each chunk is a complete, independently-processable
-    feature.batch_created event, safe for the frontend to consume
-    one at a time as they arrive.
+    Broadcasts one committed import batch. The caller is responsible
+    for keeping each batch bounded to CHUNK_SIZE.
     """
     if not features:
         return
 
-    total = len(features)
-    chunks = [features[i:i + CHUNK_SIZE] for i in range(0, total, CHUNK_SIZE)]
+    await feature_connection_manager.broadcast(
+        case_id,
+        {
+            "event": "feature.batch_created",
+            "case_id": case_id,
+            "layer_id": layer_id,
+            "chunk_index": chunk_index,
+            "total_chunks": None,
+            "count": len(features),
+            "features": features,
+        },
+    )
 
-    for idx, chunk in enumerate(chunks):
-        await feature_connection_manager.broadcast(
-            case_id,
-            {
-                "event": "feature.batch_created",
-                "case_id": case_id,
-                "layer_id": layer_id,
-                "chunk_index": idx,
-                "total_chunks": len(chunks),
-                "count": len(chunk),
-                "features": chunk,
-            },
-        )
+
+async def _broadcast_import_completed(
+    case_id: int,
+    layer_id: int,
+    imported_features: int,
+    total_chunks: int,
+) -> None:
+    await feature_connection_manager.broadcast(
+        case_id,
+        {
+            "event": "feature.batch_import_completed",
+            "case_id": case_id,
+            "layer_id": layer_id,
+            "imported_features": imported_features,
+            "total_chunks": total_chunks,
+        },
+    )
 
 
 async def process_upload(
@@ -61,6 +78,29 @@ async def process_upload(
     with open(file_path, "wb") as f:
         f.write(await file.read())
 
+    batch_state = {"chunk_index": 0}
+
+    def broadcast_created_batch(layer_id: int, created_features: list[dict]) -> None:
+        chunk_index = batch_state["chunk_index"]
+        batch_state["chunk_index"] += 1
+        try:
+            anyio.from_thread.run(
+                _broadcast_batch_created,
+                case_id,
+                layer_id,
+                created_features,
+                chunk_index,
+            )
+        except Exception as broadcast_error:
+            logger.exception(
+                "Feature batch WebSocket broadcast failed after batch commit | "
+                "case_id=%s | layer_id=%s | chunk_index=%s | error=%s",
+                case_id,
+                layer_id,
+                chunk_index,
+                broadcast_error,
+            )
+
     try:
         data = await run_in_threadpool(
             extractor.extract,
@@ -70,6 +110,8 @@ async def process_upload(
             layer_name=layer_name,
             created_by=created_by,
             db=db,
+            batch_size=CHUNK_SIZE,
+            on_batch_created=broadcast_created_batch,
         )
     except Exception:
         try:
@@ -83,16 +125,21 @@ async def process_upload(
             )
         raise
 
-    if data.get("status") == "imported" and data.get("created_features"):
+    if data.get("status") == "imported" and data.get("layer_id") is not None:
         try:
-            await _broadcast_batch_created(case_id, data["layer_id"], data["created_features"])
-        except Exception as broadcast_error:
+            await _broadcast_import_completed(
+                case_id,
+                data["layer_id"],
+                data.get("imported_features", 0),
+                batch_state["chunk_index"],
+            )
+        except Exception as completion_error:
             logger.exception(
-                "Feature batch WebSocket broadcast failed after upload import | "
+                "Feature batch import completion broadcast failed | "
                 "case_id=%s | layer_id=%s | error=%s",
                 case_id,
                 data["layer_id"],
-                broadcast_error,
+                completion_error,
             )
 
     return {

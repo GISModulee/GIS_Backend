@@ -1,0 +1,167 @@
+{
+  "healthcare": {
+    "label": "Healthcare",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "hospital": "high",
+          "blood_bank": "medium",
+          "clinic": "medium",
+          "doctors": "medium",
+          "health_post": "medium",
+          "pharmacy": "medium",
+          "dentist": "medium"
+        }
+      },
+      {
+        "column": "shop",
+        "values": {
+          "medical_supply": "medium"
+        }
+      }
+    ]
+  },
+  "emergency": {
+    "label": "Emergency",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "police": "medium",
+          "fire_station": "medium"
+        }
+      }
+    ]
+  },
+  "education": {
+    "label": "Education",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "school": "high",
+          "college": "high",
+          "university": "high",
+          "kindergarten": "medium",
+          "childcare": "medium"
+        }
+      }
+    ]
+  },
+  "transport": {
+    "label": "Transport",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "bus_station": "high",
+          "ferry_terminal": "high",
+          "taxi": "medium"
+        }
+      },
+      {
+        "column": "railway",
+        "values": {
+          "station": "high",
+          "halt": "medium",
+          "subway_entrance": "high",
+          "tram_stop": "medium",
+          "train_station_entrance": "high"
+        }
+      },
+      {
+        "column": "aeroway",
+        "values": {
+          "aerodrome": "high",
+          "terminal": "high",
+          "helipad": "medium",
+          "heliport": "medium"
+        }
+      }
+    ]
+  },
+  "sensitive_public": {
+    "label": "Sensitive Public Places",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "courthouse": "high",
+          "public_building": "high",
+          "townhall": "medium",
+          "place_of_worship": "medium",
+          "events_venue": "high",
+          "conference_centre": "high",
+          "community_centre": "medium",
+          "social_facility": "medium",
+          "social_centre": "medium"
+        }
+      }
+    ]
+  },
+  "crowd_places": {
+    "label": "Crowd Places",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "marketplace": "high",
+          "cinema": "high",
+          "theatre": "high",
+          "restaurant": "medium",
+          "fast_food": "low",
+          "food_court": "medium",
+          "bar": "medium",
+          "pub": "medium",
+          "nightclub": "medium"
+        }
+      },
+      {
+        "column": "shop",
+        "values": {
+          "mall": "high",
+          "supermarket": "medium",
+          "department_store": "medium"
+        }
+      },
+      {
+        "column": "leisure",
+        "values": {
+          "stadium": "high",
+          "park": "low",
+          "sports_centre": "low"
+        }
+      },
+      {
+        "column": "tourism",
+        "values": {
+          "hotel": "medium",
+          "guest_house": "medium",
+          "hostel": "medium",
+          "museum": "high",
+          "attraction": "high"
+        }
+      }
+    ]
+  },
+  "public_services": {
+    "label": "Public Services",
+    "rules": [
+      {
+        "column": "amenity",
+        "values": {
+          "bank": "medium",
+          "atm": "medium",
+          "fuel": "medium",
+          "library": "medium",
+          "post_office": "medium",
+          "parking": "medium",
+          "shelter": "low",
+          "drinking_water": "low",
+          "toilets": "low"
+        }
+      }
+    ]
+  }
+}

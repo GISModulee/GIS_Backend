@@ -12,6 +12,7 @@ from schemas.feature_schema import (
     FeatureActionResponse,
     FeatureCreate,
     FeatureCreateResponse,
+    MeasurementFeatureCreate,
     FeaturePatch,
     FeatureResponse,
     FeatureSummaryResponse,
@@ -26,7 +27,8 @@ from services.feature.feature_service import (
     get_case_features,
     update_feature,
     delete_feature,
-    patch_feature
+    patch_feature,
+    save_measurement_feature,
 )
 from services.feature.feature_websocket_manager import feature_connection_manager
 from services.layer.layer_service import get_layer
@@ -86,6 +88,40 @@ async def add_feature(
         )
 
     return result
+
+
+@router.post(
+    "/cases/{case_id}/layers/{layer_id}/features/measurement",
+    response_model=FeatureResponse,
+)
+async def add_measurement_feature(
+    case_id: int,
+    layer_id: int,
+    measurement: MeasurementFeatureCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(CAN_WRITE)),
+):
+    created_feature = await save_measurement_feature(
+        db=db,
+        case_id=case_id,
+        layer_id=layer_id,
+        geometry=measurement.geometry,
+        measurement_type=measurement.measurement_type,
+        distance_meters=measurement.distance_meters,
+        user_id=current_user["user_id"],
+    )
+
+    await feature_connection_manager.broadcast(
+        case_id,
+        {
+            "event": "feature.created",
+            "case_id": case_id,
+            "layer_id": layer_id,
+            "feature": created_feature,
+        },
+    )
+
+    return created_feature
 
 # ===================================================
 # UPDATE FEATURE (FULL) — Admin, Officer, Analyst

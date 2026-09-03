@@ -4,12 +4,7 @@ from pathlib import Path
 
 class Settings(BaseSettings):
     DATABASE_URL: str
-
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "llama3.1"
-    OLLAMA_TIMEOUT_SECONDS: float = 30.0
-    CHAT_HISTORY_LIMIT: int = 12
-    CHAT_PENDING_ACTION_TTL_SECONDS: int = 300
+    MAPSERVER_DATABASE_URL: str = ""
 
     LOG_DIR: str
     LOG_LEVEL: str

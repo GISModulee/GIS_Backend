@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, Field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Literal, Optional
 
 
 # ===================================================
@@ -42,6 +42,12 @@ class FeaturePatch(BaseModel):
     name: str | None = None
     properties: dict | None = None
     layer_id: int | None = None
+
+
+class MeasurementFeatureCreate(BaseModel):
+    geometry: Dict[str, Any]
+    measurement_type: Literal["straight", "walking"]
+    distance_meters: float = Field(..., ge=0)
 
 
 class FeatureResponse(BaseModel):
