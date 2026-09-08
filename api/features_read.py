@@ -6,12 +6,11 @@ from schemas.feature_schema import FeatureResponse, FeatureSummaryResponse
 from services.feature.feature_service import (
     get_case_features,
     get_feature_by_number,
-    get_features,
     get_layer_features,
 )
 from services.layer.layer_service import get_layer
 from utils.constants import FEATURE_NOT_FOUND, LAYER_NOT_FOUND
-from utils.dependencies import get_current_user
+from utils.dependencies import authorize_case, get_access_token, get_current_case_context
 from utils.exceptions import NotFoundError
 from utils.logger import logger
 
@@ -21,11 +20,12 @@ router = APIRouter(tags=["Features"])
 # GET ALL FEATURES — any authenticated user
 # ===================================================
 @router.get("/features", response_model=list[FeatureResponse])
-async def list_features(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def list_features(case_id: int, db: Session = Depends(get_db), access_token: str = Depends(get_access_token)):
+    current_user = await authorize_case(access_token, case_id)
 
     logger.info(f"GET /features | user_id={current_user['user_id']}")
 
-    return await get_features(db)
+    return await get_case_features(case_id, db)
 
 
 # ===================================================
@@ -38,7 +38,7 @@ async def get_single_feature(
     layer_id: int,
     feature_number: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
 
     logger.info(f"GET /cases/{case_id}/layers/{layer_id}/features/{feature_number} | user_id={current_user['user_id']}")
@@ -59,7 +59,7 @@ async def list_layer_features(
     case_id: int,
     layer_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
 
     logger.info(f"GET /cases/{case_id}/layers/{layer_id}/features | user_id={current_user['user_id']}")
@@ -81,7 +81,7 @@ async def list_layer_features(
 async def list_case_features(
     case_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
 
     logger.info(
@@ -89,5 +89,3 @@ async def list_case_features(
     )
 
     return await get_case_features(case_id, db)
-
-

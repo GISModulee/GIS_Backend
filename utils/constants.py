@@ -49,13 +49,7 @@ DETAIL_DATABASE_ERROR = "A database error occurred. Please try again later."
 DETAIL_UNEXPECTED_ERROR = "An unexpected error occurred. Please try again or contact support."
  
 AUTH_CREDENTIALS_MISSING = "Authentication credentials were not provided."
-AUTH_TOKEN_INVALID_OR_EXPIRED = "Invalid or expired token."
-AUTH_TOKEN_PAYLOAD_INVALID = "Invalid token payload."
 AUTH_ROLE_FORBIDDEN = "You do not have permission to perform this action."
-AUTH_EMAIL_ALREADY_REGISTERED = "Email already registered"
-AUTH_INVALID_EMAIL_OR_PASSWORD = "Invalid email or password"
-AUTH_REGISTRATION_FAILED = "Failed to register user"
-AUTH_LOGIN_FAILED = "Failed to process login"
  
 CASE_NOT_FOUND = "Case not found"
 CASE_ID_REQUIRED = "case_id is required"

@@ -24,12 +24,12 @@ from services.layer.layer_service import get_layer
 from services.layer.layer_websocket_manager import layer_connection_manager
 from services.feature.feature_websocket_manager import feature_connection_manager
 
-from utils.dependencies import get_current_user
+from utils.dependencies import authorize_case, enforce_role, get_access_token
+from utils.roles import INVESTIGATION_ROLES
 
 router = APIRouter(
     prefix="/vector",
     tags=["Vector Operations"],
-    dependencies=[Depends(get_current_user)]
 )
 
 
@@ -79,8 +79,9 @@ async def _broadcast_vector_result_created(result, db):
 async def union(
     operation: VectorOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await union_features(
         operation.case_id,
         operation.feature_numbers,
@@ -96,8 +97,9 @@ async def union(
 async def intersection(
     operation: VectorOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await intersection_features(
         operation.case_id,
         operation.feature_numbers,
@@ -113,8 +115,9 @@ async def intersection(
 async def difference(
     operation: VectorOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await difference_features(
         operation.case_id,
         operation.feature_numbers,
@@ -130,8 +133,9 @@ async def difference(
 async def symdifference(
     operation: VectorOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await symdifference_features(
         operation.case_id,
         operation.feature_numbers,
@@ -147,8 +151,9 @@ async def symdifference(
 async def buffer(
     operation: BufferOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await buffer_feature(
         operation.case_id,
         operation.feature_number,
@@ -165,8 +170,9 @@ async def buffer(
 async def centroid(
     operation: CentroidOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await centroid_feature(
         operation.case_id,
         operation.feature_number,
@@ -182,8 +188,9 @@ async def centroid(
 async def convex(
     operation: ConvexHullOperation,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, operation.case_id), INVESTIGATION_ROLES)
     result = await convex_hull(
         operation.case_id,
         operation.feature_numbers,

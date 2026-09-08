@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from database.database import get_db
+from models.model import ImageRecord
 from schemas.geoclip_schema import (
     FeatureCollectionResponse,
     ImageResponse,
@@ -21,7 +22,9 @@ from services.feature.feature_service import get_feature
 from services.layer.layer_service import get_layer
 from services.layer.layer_websocket_manager import layer_connection_manager
 from services.feature.feature_websocket_manager import feature_connection_manager
-from utils.dependencies import get_current_user, require_roles
+from utils.dependencies import authorize_case, enforce_role, get_access_token
+from utils.exceptions import NotFoundError
+from utils.constants import IMAGE_NOT_FOUND, LAYER_NOT_FOUND
 from utils.roles import CAN_UPLOAD, CAN_DELETE_OPERATIONAL
 from utils.logger import logger
 
@@ -36,7 +39,7 @@ async def upload_image(
     file: Annotated[UploadFile, File(...)],
     db: Annotated[Session, Depends(get_db)],
     case_id: Annotated[int, Form(...)],
-    current_user=Depends(require_roles(CAN_UPLOAD)),
+    access_token: str = Depends(get_access_token),
     top_k: Annotated[
         int | None,
         Form(description="Number of location predictions to generate (1-20). Defaults to server setting if omitted.")
@@ -46,6 +49,7 @@ async def upload_image(
         Form(description="Optional name for the layer created from this upload. Defaults to 'Untitled {layer_id}' if omitted.")
     ] = None,
 ):
+    current_user = enforce_role(await authorize_case(access_token, case_id), CAN_UPLOAD)
     logger.info(
         f"POST /upload | user_id={current_user['user_id']} | role={current_user['role']} | "
         f"case_id={case_id} | filename={file.filename} | top_k={top_k} | layer_name={layer_name}"
@@ -96,10 +100,14 @@ async def upload_image(
 async def get_images_by_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
+    layer = await get_layer(layer_id, db)
+    if layer is None:
+        raise NotFoundError(LAYER_NOT_FOUND)
+    current_user = await authorize_case(access_token, layer["case_id"])
     """Paginated: defaults to 100 rows per page, use ?limit=&offset= to page."""
     logger.info(
         f"GET /layers/{layer_id}/images | user_id={current_user['user_id']} | "
@@ -115,10 +123,14 @@ async def get_images_by_layer(
 async def get_features_by_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
     limit: int = Query(500, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
+    layer = await get_layer(layer_id, db)
+    if layer is None:
+        raise NotFoundError(LAYER_NOT_FOUND)
+    current_user = await authorize_case(access_token, layer["case_id"])
     logger.info(
         f"GET /layers/{layer_id}/features | user_id={current_user['user_id']} | "
         f"limit={limit} | offset={offset}"
@@ -130,8 +142,15 @@ async def get_features_by_layer(
 async def get_image(
     image_id: str,
     db: Annotated[Session, Depends(get_db)],
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ):
+    image = db.get(ImageRecord, image_id)
+    if image is None:
+        raise NotFoundError(IMAGE_NOT_FOUND)
+    layer = await get_layer(image.layer_id, db)
+    if layer is None:
+        raise NotFoundError(LAYER_NOT_FOUND)
+    current_user = await authorize_case(access_token, layer["case_id"])
     logger.info(f"GET /image/{image_id} | user_id={current_user['user_id']}")
     return await get_image_service(image_id, db)
 
@@ -143,10 +162,14 @@ async def get_image(
 async def delete_layer(
     layer_id: int,
     db: Annotated[Session, Depends(get_db)],
-    current_user=Depends(require_roles(CAN_DELETE_OPERATIONAL)),
+    access_token: str = Depends(get_access_token),
 ):
+    layer = await get_layer(layer_id, db)
+    if layer is None:
+        raise NotFoundError(LAYER_NOT_FOUND)
+    current_user = enforce_role(await authorize_case(access_token, layer["case_id"]), CAN_DELETE_OPERATIONAL)
     logger.warning(f"DELETE /layers/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
-    existing_layer = await get_layer(layer_id, db)
+    existing_layer = layer
     result = await delete_layer_service(layer_id, db)
 
     if existing_layer:

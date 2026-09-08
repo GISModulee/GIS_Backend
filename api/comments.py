@@ -26,8 +26,7 @@ from schemas.comment_schema import (
     CommentThreadResponse,
 )
 from utils.constants import COMMENT_NOT_FOUND, WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
-from utils.auth_utils import decode_access_token
-from utils.dependencies import get_current_user, require_roles
+from utils.dependencies import require_roles_for_case
 from utils.roles import CAN_COMMENT
 from utils.exceptions import NotFoundError
 from utils.logger import logger
@@ -46,7 +45,7 @@ async def add_comment(
         None,
         description="Optional attachment: image (jpg/png/webp), PDF, DOCX, or plain text file."
     ),
-    current_user=Depends(require_roles(CAN_COMMENT))
+    current_user=Depends(require_roles_for_case(CAN_COMMENT))
 ):
     logger.info(
         f"POST /cases/{case_id}/layers/{layer_id}/comments | feature_number={feature_number} | "
@@ -60,6 +59,8 @@ async def add_comment(
         current_user["user_id"],
         comment,
         attachment,
+        None,
+        current_user,
     )
     await comment_connection_manager.broadcast(
         case_id,
@@ -103,7 +104,7 @@ async def add_reply(
         None,
         description="Optional attachment: image (jpg/png/webp), PDF, DOCX, or plain text file."
     ),
-    current_user=Depends(require_roles(CAN_COMMENT))
+    current_user=Depends(require_roles_for_case(CAN_COMMENT))
 ):
     logger.info(
         f"POST /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/reply | "
@@ -118,6 +119,7 @@ async def add_reply(
         comment,
         attachment,
         parent_comment_id,
+        current_user,
     )
     await comment_connection_manager.broadcast(
         case_id,
@@ -166,7 +168,7 @@ async def remove_comment(
     feature_number: int,
     comment_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_COMMENT)),
+    current_user=Depends(require_roles_for_case(CAN_COMMENT)),
 ):
     logger.warning(
         f"DELETE /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id} | "

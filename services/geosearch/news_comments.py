@@ -68,6 +68,8 @@ async def add_news_to_comment(request: NewsCommentRequest, current_user: dict) -
         current_user["user_id"],
         format_news_comment(request),
         None,
+        None,
+        current_user,
     )
 
     await comment_connection_manager.broadcast(

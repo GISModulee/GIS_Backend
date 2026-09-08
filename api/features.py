@@ -5,8 +5,7 @@ from database.database import get_db
 from utils.constants import FEATURE_NOT_FOUND, LAYER_NOT_FOUND, WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.logger import logger
 from utils.exceptions import NotFoundError
-from utils.auth_utils import decode_access_token
-from utils.dependencies import get_current_user, require_roles
+from utils.dependencies import authorize_case, enforce_role, get_access_token, get_current_user, get_current_case_context, require_roles, require_roles_for_case
 from utils.roles import CAN_WRITE, CAN_DELETE_OPERATIONAL
 from schemas.feature_schema import (
     FeatureActionResponse,
@@ -38,14 +37,18 @@ router = APIRouter(tags=["Features"])
 
 
 # ===================================================
-# CREATE FEATURE — Admin, Officer, Analyst
+# CREATE FEATURE — Investigator, Department Lead, Case Lead
+# NOTE: case_id is inside the request body (feature.case_id), not a
+# path param, so this stays token-only for now, same reasoning as
+# POST /cases and POST /layers.
 # ===================================================
 @router.post("/features", response_model=FeatureCreateResponse)
 async def add_feature(
     feature: FeatureCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE))
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, feature.case_id), CAN_WRITE)
     logger.info(
         f"POST /features | user_id={current_user['user_id']} "
         f"| role={current_user['role']} "
@@ -99,7 +102,7 @@ async def add_measurement_feature(
     layer_id: int,
     measurement: MeasurementFeatureCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE)),
+    current_user=Depends(require_roles_for_case(CAN_WRITE)),
 ):
     created_feature = await save_measurement_feature(
         db=db,
@@ -124,7 +127,7 @@ async def add_measurement_feature(
     return created_feature
 
 # ===================================================
-# UPDATE FEATURE (FULL) — Admin, Officer, Analyst
+# UPDATE FEATURE (FULL) — Investigator, Department Lead, Case Lead
 # ===================================================
 @router.put("/cases/{case_id}/layers/{layer_id}/features/{feature_id}", response_model=FeatureActionResponse)
 async def edit_feature(
@@ -133,7 +136,7 @@ async def edit_feature(
     feature_id: int,
     feature: FeatureCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE))
+    current_user=Depends(require_roles_for_case(CAN_WRITE))
 ):
 
     logger.info(f"PUT /cases/{case_id}/layers/{layer_id}/features/{feature_id} | user_id={current_user['user_id']} | role={current_user['role']}")
@@ -165,7 +168,7 @@ async def edit_feature(
 
 
 # ===================================================
-# PATCH FEATURE (PARTIAL) — Admin, Officer, Analyst
+# PATCH FEATURE (PARTIAL) — Investigator, Department Lead, Case Lead
 # ===================================================
 @router.patch("/cases/{case_id}/layers/{layer_id}/features/{feature_id}", response_model=FeatureActionResponse)
 async def edit_feature_partial(
@@ -174,7 +177,7 @@ async def edit_feature_partial(
     feature_id: int,
     feature: FeaturePatch,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE))
+    current_user=Depends(require_roles_for_case(CAN_WRITE))
 ):
 
     logger.info(f"PATCH /cases/{case_id}/layers/{layer_id}/features/{feature_id} | user_id={current_user['user_id']} | role={current_user['role']}")
@@ -203,7 +206,7 @@ async def edit_feature_partial(
 
 
 # ===================================================
-# DELETE FEATURE — Admin, Officer
+# DELETE FEATURE — Investigator, Department Lead, Case Lead
 # ===================================================
 @router.delete("/cases/{case_id}/layers/{layer_id}/features/{feature_id}", response_model=FeatureActionResponse)
 async def remove_feature(
@@ -211,7 +214,7 @@ async def remove_feature(
     layer_id: int,
     feature_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_DELETE_OPERATIONAL))
+    current_user=Depends(require_roles_for_case(CAN_DELETE_OPERATIONAL))
 ):
 
     logger.warning(f"DELETE /cases/{case_id}/layers/{layer_id}/features/{feature_id} | user_id={current_user['user_id']} | role={current_user['role']}")
@@ -236,6 +239,3 @@ async def remove_feature(
     )
 
     return result
-
-
-# ===================================================

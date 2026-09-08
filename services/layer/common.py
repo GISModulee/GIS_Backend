@@ -1,7 +1,7 @@
 from sqlalchemy import Integer, cast, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from models.model import Layer, Case
+from models.model import Layer
 from utils.constants import (
     CASE_NOT_FOUND,
     FIELDS_UPDATE_MISSING,

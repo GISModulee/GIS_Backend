@@ -7,7 +7,7 @@ from geoalchemy2 import Geography, Geometry
 from sqlalchemy import cast, exists, func, insert, literal, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
-from models.model import Comment, Feature, Layer, Case, Comment
+from models.model import Comment, Feature, Layer
 from schemas.feature_schema import FeatureCreate
 from utils.constants import (
     CASE_ID_REQUIRED,

@@ -4,7 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Comment, User, Feature, Case
+from models.model import Comment
 from utils.config import settings
 from utils.constants import (
     CASE_NOT_FOUND,

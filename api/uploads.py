@@ -8,7 +8,7 @@ from services.layer.layer_service import get_layer
 from services.layer.layer_websocket_manager import layer_connection_manager
 from services.feature.feature_websocket_manager import feature_connection_manager
 from schemas.upload_schema import UploadResponse
-from utils.dependencies import require_roles
+from utils.dependencies import authorize_case, enforce_role, get_access_token
 from utils.roles import CAN_UPLOAD
 from utils.logger import logger
 from typing import Annotated
@@ -22,10 +22,7 @@ router = APIRouter(
 async def upload_file(
     case_id: Annotated[int, Form(...)],
     file: Annotated[UploadFile, File()],
-    current_user: Annotated[
-        dict,
-        Depends(require_roles(CAN_UPLOAD)),
-    ],
+    access_token: Annotated[str, Depends(get_access_token)],
     db: Annotated[Session, Depends(get_db)],
     layer_name: Annotated[
         str | None,
@@ -37,6 +34,7 @@ async def upload_file(
         ),
     ] = None,
 ):
+    current_user = enforce_role(await authorize_case(access_token, case_id), CAN_UPLOAD)
     logger.info(
         f"POST /import | "
         f"user_id={current_user['user_id']} | "

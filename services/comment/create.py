@@ -4,7 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Comment, User, Feature, Case
+from models.model import Comment, Feature
 from utils.config import settings
 from utils.constants import (
     CASE_NOT_FOUND,
@@ -20,7 +20,8 @@ from utils.constants import (
 from utils.logger import logger
 from utils.exceptions import NotFoundError, ServiceUnavailableError
 from services.comment.comment_validator import CommentAttachmentValidator
-from services.comment.serializers import _comment_to_dict
+from services.comment.serializers import remember_comment_author
+
 
 def create_comment(
     case_id,
@@ -30,6 +31,7 @@ def create_comment(
     comment,
     attachment: UploadFile | None = None,
     parent_comment_id: int | None = None,
+    author: dict | None = None,
 ):
 
     logger.info(
@@ -113,11 +115,8 @@ def create_comment(
             db.flush()
             db.refresh(new_comment)
 
-            # Fetch the author's display info now, while the session is
-            # still open — needed to build the full comment object below.
-            user = db.get(User, user_id)
-
             comment_id = new_comment.id
+            author_display = remember_comment_author(author)
             full_comment = {
                 "id": new_comment.id,
                 "parent_comment_id": new_comment.parent_comment_id,
@@ -126,9 +125,7 @@ def create_comment(
                 "layer_id": new_comment.layer_id,
                 "feature_number": new_comment.feature_number,
                 "user_id": new_comment.user_id,
-                "user_full_name": user.full_name if user else None,
-                "user_username": user.username if user else None,
-                "user_role": user.role if user else None,
+                **author_display,
                 "comment": new_comment.comment,
                 "has_attachment": new_comment.attachment_filename is not None,
                 "attachment_filename": new_comment.attachment_filename,

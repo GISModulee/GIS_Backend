@@ -5,8 +5,7 @@ from database.database import get_db
 from schemas.layer_schema import LayerActionResponse, LayerCreate, LayerCreateResponse, LayerPatch, LayerResponse
 from utils.constants import LAYER_NOT_FOUND, WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.exceptions import NotFoundError
-from utils.auth_utils import decode_access_token
-from utils.dependencies import get_current_user, require_roles
+from utils.dependencies import authorize_case, enforce_role, get_access_token, get_current_user, get_current_case_context, require_roles, require_roles_for_case
 from utils.roles import CAN_WRITE, CAN_DELETE_OPERATIONAL
 from services.layer.layer_service import (
     create_layer,
@@ -28,7 +27,8 @@ router = APIRouter(
 
 
 @router.post("", response_model=LayerCreateResponse)
-async def add_layer(layer: LayerCreate, db: Session = Depends(get_db), current_user=Depends(require_roles(CAN_WRITE))):
+async def add_layer(layer: LayerCreate, db: Session = Depends(get_db), access_token: str = Depends(get_access_token)):
+    current_user = enforce_role(await authorize_case(access_token, layer.case_id), CAN_WRITE)
     logger.info(f"POST /layers | user_id={current_user['user_id']} | role={current_user['role']} | body={layer.model_dump()}")
 
     result = await create_layer(layer.model_dump(), db)
@@ -48,13 +48,14 @@ async def add_layer(layer: LayerCreate, db: Session = Depends(get_db), current_u
 
 
 @router.get("", response_model=list[LayerResponse])
-async def list_layers(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    logger.info(f"GET /layers | user_id={current_user['user_id']}")
-    return await get_layers(db)
+async def list_layers(case_id: int, db: Session = Depends(get_db), access_token: str = Depends(get_access_token)):
+    current_user = await authorize_case(access_token, case_id)
+    logger.info(f"GET /layers | user_id={current_user['user_id']} | case_id={case_id}")
+    return await get_case_layers(case_id, db)
 
 
 @router.get("/case/{case_id}", response_model=list[LayerResponse])
-async def list_case_layers(case_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+async def list_case_layers(case_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_case_context)):
     logger.info(f"GET /layers/case/{case_id} | user_id={current_user['user_id']}")
     return await get_case_layers(case_id, db)
 
@@ -64,7 +65,7 @@ async def get_single_layer(
     case_id: int,
     layer_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
     logger.info(f"GET /layers/case/{case_id}/{layer_id} | user_id={current_user['user_id']}")
 
@@ -83,7 +84,7 @@ async def edit_layer(
     layer_id: int,
     layer: LayerCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE))
+    current_user=Depends(require_roles_for_case(CAN_WRITE))
 ):
     logger.info(f"PUT /layers/case/{case_id}/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
 
@@ -116,7 +117,7 @@ async def edit_layer_partial(
     layer_id: int,
     layer: LayerPatch,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE))
+    current_user=Depends(require_roles_for_case(CAN_WRITE))
 ):
     logger.info(f"PATCH /layers/case/{case_id}/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
 
@@ -148,7 +149,7 @@ async def remove_layer(
     case_id: int,
     layer_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_DELETE_OPERATIONAL))
+    current_user=Depends(require_roles_for_case(CAN_DELETE_OPERATIONAL))
 ):
     logger.warning(f"DELETE /layers/case/{case_id}/{layer_id} | user_id={current_user['user_id']} | role={current_user['role']}")
 
@@ -185,8 +186,13 @@ async def remove_layer(
 async def case_layer_updates(websocket: WebSocket, case_id: int):
     """Push live layer.created/updated/deleted events to authenticated case subscribers."""
     token = websocket.query_params.get("token")
-    payload = decode_access_token(token) if token else None
-    if not payload or payload.get("user_id") is None or payload.get("sub") is None:
+    payload = None
+    if token:
+        try:
+            payload = await authorize_case(token, case_id)
+        except Exception:
+            payload = None
+    if not payload or payload.get("user_id") is None or payload.get("email") is None:
         logger.warning(
             "Layer WebSocket authentication rejected | case_id=%s",
             case_id,

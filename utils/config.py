@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int
 
+    CI_BASE_URL: str
+    MODULE_SLUG: str
+
     class Config:
         env_file = ".env"
 

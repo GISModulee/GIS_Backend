@@ -1,7 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from services.feature.feature_websocket_manager import feature_connection_manager
-from utils.auth_utils import decode_access_token
+from utils.dependencies import authorize_case
 from utils.constants import WEBSOCKET_AUTH_REQUIRED, WEBSOCKET_POLICY_VIOLATION
 from utils.logger import logger
 
@@ -20,8 +20,13 @@ router = APIRouter(tags=["Features"])
 async def case_feature_updates(websocket: WebSocket, case_id: int):
     """Push live feature.created/updated/deleted events to authenticated case subscribers."""
     token = websocket.query_params.get("token")
-    payload = decode_access_token(token) if token else None
-    if not payload or payload.get("user_id") is None or payload.get("sub") is None:
+    payload = None
+    if token:
+        try:
+            payload = await authorize_case(token, case_id)
+        except Exception:
+            payload = None
+    if not payload or payload.get("user_id") is None or payload.get("email") is None:
         logger.warning(
             "Feature WebSocket authentication rejected | case_id=%s",
             case_id,

@@ -69,6 +69,21 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
+### MIME detection (libmagic)
+
+File/attachment upload validation detects the real content type with `python-magic`, a wrapper around the native libmagic C library. MIME detection is not optional — it protects against rename attacks (e.g. an `.exe` renamed to `report.pdf` is rejected).
+
+The correct libmagic provider is selected automatically per platform by `requirements.txt`:
+
+- **Windows** — `pip install -r requirements.txt` installs `python-magic-bin`, which bundles the required Windows libmagic DLL. No extra step.
+- **Linux/WSL** — `python-magic` wraps the system libmagic library, so first install it with:
+
+  ```bash
+  sudo apt-get install libmagic1
+  ```
+
+  (On some distributions/older packages the development package `libmagic-dev` may be required instead.) `pip install -r requirements.txt` does **not** install the Linux system library itself.
+
 ## Database
 
 Apply migrations:

@@ -7,7 +7,7 @@ from services.feature.feature_service import get_feature
 from services.feature.feature_websocket_manager import feature_connection_manager
 from services.hotspots.service import save_hotspots, search_hotspots
 from utils.constants import STATUS_OK
-from utils.dependencies import get_current_user, require_roles
+from utils.dependencies import authorize_case, enforce_role, get_access_token, get_current_user, require_roles
 from utils.logger import logger
 from utils.roles import CAN_WRITE
 
@@ -23,7 +23,9 @@ router = APIRouter(
 async def search_feature_hotspots(
     request: HotspotSearchRequest,
     db: Session = Depends(get_db),
+    access_token: str = Depends(get_access_token),
 ):
+    await authorize_case(access_token, request.case_id)
     logger.info(
         "Hotspot search requested | case_id=%s | layer_id=%s | feature_number=%s | limit=%s",
         request.case_id,
@@ -38,8 +40,9 @@ async def search_feature_hotspots(
 async def save_feature_hotspots(
     request: HotspotSaveRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(require_roles(CAN_WRITE)),
+    access_token: str = Depends(get_access_token),
 ):
+    current_user = enforce_role(await authorize_case(access_token, request.case_id), CAN_WRITE)
     logger.info(
         "Hotspot save requested | user_id=%s | case_id=%s | source_layer_id=%s | "
         "source_feature_number=%s | count=%s",

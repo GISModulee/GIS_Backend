@@ -16,7 +16,7 @@ from services.geosearch.history import (
 from services.geosearch.news_comments import add_news_to_comment
 from services.geosearch.service import GeoSearchService
 from utils.constants import STATUS_OK
-from utils.dependencies import get_current_user, require_roles
+from utils.dependencies import authorize_case, enforce_role, get_access_token, get_current_user, require_roles
 from utils.logger import logger
 from utils.roles import CAN_COMMENT
 
@@ -35,9 +35,10 @@ router = APIRouter(
 )
 async def search_news(
     request: GeoSearchRequest,
-    current_user=Depends(get_current_user),
+    access_token: str = Depends(get_access_token),
 ) -> GeoSearchResponse:
     """Search current news relevant to a supplied geographic area."""
+    current_user = await authorize_case(access_token, request.case_id)
     logger.info(
         "Geo news search requested | case_id=%s | layer_id=%s | "
         "feature_number=%s | max_results=%s",
@@ -87,9 +88,10 @@ async def clear_news_history(current_user=Depends(get_current_user)):
 )
 async def add_news_comment(
     request: NewsCommentRequest,
-    current_user=Depends(require_roles(CAN_COMMENT)),
+    access_token: str = Depends(get_access_token),
 ):
     """Store a selected news item as a normal feature comment."""
+    current_user = enforce_role(await authorize_case(access_token, request.case_id), CAN_COMMENT)
     logger.info(
         "Add news to comment requested | user_id=%s | case_id=%s | layer_id=%s | feature_number=%s",
         current_user["user_id"],

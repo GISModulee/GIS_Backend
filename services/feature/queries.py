@@ -6,7 +6,7 @@ from geoalchemy2 import Geography, Geometry
 from sqlalchemy import cast, exists, func, select
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError
 
-from models.model import Comment, Feature, Layer, Case, Comment
+from models.model import Comment, Feature, Layer
 from schemas.feature_schema import FeatureCreate
 from utils.constants import (
     CASE_ID_REQUIRED,
@@ -48,18 +48,6 @@ async def get_case_features(case_id, db):
     )
 
     try:
-        case_exists = db.scalar(
-            select(Case.id).where(
-                Case.id == case_id
-            )
-        )
-
-        if case_exists is None:
-            logger.warning(
-                f"Get case features failed: case not found | case_id={case_id}"
-            )
-            raise NotFoundError(CASE_NOT_FOUND)
-
         result = db.execute(
             (await _feature_select())
             .where(

@@ -2,8 +2,6 @@ from sqlalchemy import text
 
 from database.database import engine, Base
 from models.model import (
-    User,
-    Case,
     Layer,
     Feature,
     Comment,

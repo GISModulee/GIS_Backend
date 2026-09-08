@@ -4,7 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Comment, User, Feature, Case
+from models.model import Comment, Feature
 from utils.config import settings
 from utils.constants import (
     CASE_NOT_FOUND,
@@ -20,7 +20,7 @@ from utils.constants import (
 from utils.logger import logger
 from utils.exceptions import NotFoundError, ServiceUnavailableError
 from services.comment.comment_validator import CommentAttachmentValidator
-from services.comment.serializers import _comment_to_dict
+from services.comment.serializers import _author_for_user, _comment_to_dict
 
 def get_feature_comments(case_id, layer_id, feature_number, db):
 
@@ -47,13 +47,11 @@ def get_feature_comments(case_id, layer_id, feature_number, db):
             )
             raise NotFoundError(LAYER_NOT_FOUND)
 
-        result = db.execute(
-            select(Comment.id)
+        comments = db.scalars(
+            select(Comment)
             .where(Comment.feature_id == feature.id)
             .order_by(Comment.created_at.asc())
-        )
-
-        comments = [{"id": row.id} for row in result]
+        ).all()
 
     except NotFoundError:
         raise
@@ -65,7 +63,7 @@ def get_feature_comments(case_id, layer_id, feature_number, db):
         )
         raise ServiceUnavailableError(COMMENT_FETCH_FAILED) from e
 
-    return comments
+    return [_comment_to_dict(comment) for comment in comments]
 
 
 # ===================================================
@@ -106,14 +104,14 @@ def get_feature_comment_thread(case_id, layer_id, feature_number, db):
         rows = db.execute(
             text("""
                 WITH RECURSIVE thread AS (
-                    SELECT id, parent_comment_id, user_id, comment,
+                    SELECT id, parent_comment_id, root_comment_id, user_id, comment,
                            attachment_filename, attachment_content_type, created_at
                     FROM comments
                     WHERE feature_id = :feature_id AND parent_comment_id IS NULL
 
                     UNION ALL
 
-                    SELECT c.id, c.parent_comment_id, c.user_id, c.comment,
+                    SELECT c.id, c.parent_comment_id, c.root_comment_id, c.user_id, c.comment,
                            c.attachment_filename, c.attachment_content_type, c.created_at
                     FROM comments c
                     INNER JOIN thread t ON c.parent_comment_id = t.id
@@ -141,6 +139,9 @@ def get_feature_comment_thread(case_id, layer_id, feature_number, db):
         node = {
             "id": row["id"],
             "user_id": row["user_id"],
+            "parent_comment_id": row["parent_comment_id"],
+            "root_comment_id": row["root_comment_id"],
+            **_author_for_user(row["user_id"]),
             "comment": row["comment"],
             "has_attachment": row["attachment_filename"] is not None,
             "attachment_filename": row["attachment_filename"],

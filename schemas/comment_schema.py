@@ -63,6 +63,10 @@ class CommentResponse(BaseModel):
     feature_number: int | None = None
     layer_id: int | None = None
     user_full_name: str | None = None
+    user_first_name: str | None = None
+    user_last_name: str | None = None
+    user_email: str | None = None
+    username: str | None = None
     user_username: str | None = None
     user_role: str | None = None
     reply_count: int | None = None
@@ -85,6 +89,13 @@ class CommentThreadResponse(BaseModel):
     user_id: int
     parent_comment_id: int | None = None
     root_comment_id: int | None = None
+    user_full_name: str | None = None
+    user_first_name: str | None = None
+    user_last_name: str | None = None
+    user_email: str | None = None
+    username: str | None = None
+    user_username: str | None = None
+    user_role: str | None = None
     comment: str
     has_attachment: bool
     attachment_filename: str | None = None

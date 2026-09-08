@@ -2,7 +2,7 @@ from fastapi import UploadFile
 
 from services.comment.create import create_comment
 
-def create_reply(case_id, layer_id, feature_number, parent_comment_id, user_id, comment, attachment: UploadFile | None = None):
+def create_reply(case_id, layer_id, feature_number, parent_comment_id, user_id, comment, attachment: UploadFile | None = None, author: dict | None = None):
     return create_comment(
         case_id,
         layer_id,
@@ -10,5 +10,6 @@ def create_reply(case_id, layer_id, feature_number, parent_comment_id, user_id, 
         user_id,
         comment,
         attachment,
-        parent_comment_id=parent_comment_id,
+        parent_comment_id,
+        author,
     )

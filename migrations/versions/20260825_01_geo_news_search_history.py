@@ -36,9 +36,7 @@ def upgrade() -> None:
         sa.Column("end_date", sa.DateTime(timezone=True), nullable=True),
         sa.Column("max_results", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
-        sa.ForeignKeyConstraint(["case_id"], ["cases.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["layer_id"], ["layers.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         schema=SCHEMA,
     )

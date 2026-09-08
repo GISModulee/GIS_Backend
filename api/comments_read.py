@@ -10,8 +10,9 @@ from services.comment.comment_service import (
     get_feature_comments,
     get_layer_comments,
 )
-from schemas.comment_schema import CommentIdResponse, CommentResponse, CommentThreadResponse
-from utils.dependencies import get_current_user
+from services.comment.serializers import remember_comment_author
+from schemas.comment_schema import CommentResponse, CommentThreadResponse
+from utils.dependencies import get_current_case_context
 from utils.logger import logger
 
 router = APIRouter(tags=["Comments"])
@@ -25,18 +26,19 @@ router = APIRouter(tags=["Comments"])
 # to select only Comment.id. All other comment routes below are
 # untouched and still return full CommentResponse objects.
 
-@router.get("/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments", response_model=list[CommentIdResponse])
+@router.get("/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments", response_model=list[CommentResponse])
 def list_feature_comments(
     case_id: int,
     layer_id: int,
     feature_number: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
  
     logger.info(
         f"GET /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments | user_id={current_user['user_id']}"
     )
+    remember_comment_author(current_user)
  
     return get_feature_comments(case_id, layer_id, feature_number, db)
 
@@ -54,13 +56,14 @@ def list_feature_comment_thread(
     layer_id: int,
     feature_number: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
 
     logger.info(
         f"GET /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/thread | "
         f"user_id={current_user['user_id']}"
     )
+    remember_comment_author(current_user)
 
     return get_feature_comment_thread(case_id, layer_id, feature_number, db)
 
@@ -75,13 +78,14 @@ def list_comment_replies(
     feature_number: int,
     comment_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_case_context),
 ):
 
     logger.info(
         f"GET /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}/replies | "
         f"user_id={current_user['user_id']}"
     )
+    remember_comment_author(current_user)
 
     return get_comment_replies(case_id, layer_id, feature_number, comment_id, db)
 
@@ -93,7 +97,7 @@ def fetch_comment_attachment(
     feature_number: int,
     comment_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
  
     logger.info(
@@ -111,12 +115,13 @@ def fetch_comment_attachment(
 def list_case_comments(
     case_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
  
     logger.info(
         f"GET /cases/{case_id}/comments | user_id={current_user['user_id']}"
     )
+    remember_comment_author(current_user)
  
     return get_case_comments(case_id, db)
 
@@ -130,12 +135,12 @@ def list_layer_comments(
     case_id: int,
     layer_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_case_context)
 ):
 
     logger.info(
         f"GET /cases/{case_id}/layers/{layer_id}/comments | user_id={current_user['user_id']}"
     )
+    remember_comment_author(current_user)
 
     return get_layer_comments(case_id, layer_id, db)
- 

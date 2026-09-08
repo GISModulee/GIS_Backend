@@ -4,7 +4,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import SessionLocal
-from models.model import Comment, User, Feature, Case
+from models.model import Comment
 from utils.config import settings
 from utils.constants import (
     CASE_NOT_FOUND,
@@ -29,18 +29,6 @@ def get_case_comments(case_id: int, db):
     )
 
     try:
-        case_exists = db.scalar(
-            select(Case.id).where(
-                Case.id == case_id
-            )
-        )
-
-        if case_exists is None:
-            logger.warning(
-                f"Get case comments failed: case not found | case_id={case_id}"
-            )
-            raise NotFoundError(CASE_NOT_FOUND)
-
         comments = db.scalars(
             select(Comment)
             .where(
@@ -81,16 +69,6 @@ def get_layer_comments(case_id: int, layer_id: int, db):
     )
 
     try:
-        case_exists = db.scalar(
-            select(Case.id).where(Case.id == case_id)
-        )
-
-        if case_exists is None:
-            logger.warning(
-                f"Get layer comments failed: case not found | case_id={case_id}"
-            )
-            raise NotFoundError(CASE_NOT_FOUND)
-
         reply_counts = (
             select(
                 Comment.root_comment_id.label("root_comment_id"),

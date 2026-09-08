@@ -21,11 +21,13 @@ torch==2.5.1
 transformers==4.37.2
 geoclip==1.2.0
 
-python-magic==0.4.27
+# python-magic is a wrapper around the native libmagic C library and both
+# providers expose the same `magic` module, so exactly ONE is installed per
+# platform (no conflicts):
+#   - Windows: python-magic-bin bundles the required libmagic DLL.
+#   - Linux/macOS: python-magic wraps the system libmagic (see README).
+python-magic-bin==0.4.14; sys_platform == "win32"
+python-magic==0.4.27; sys_platform != "win32"
 
 geopandas==1.0.1
 rasterio==1.3.11
-
-bcrypt==4.0.1
-passlib[bcrypt]==1.7.4
-PyJWT==2.10.1
