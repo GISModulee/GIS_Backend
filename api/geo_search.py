@@ -70,7 +70,7 @@ async def list_news_search_history(
     )
     return await get_news_search_history(current_user["user_id"], limit, offset)
 
-
+    
 @router.delete(
     "/news/history",
     response_model=GeoNewsSearchHistoryClearResponse,

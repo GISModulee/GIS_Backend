@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from api.auth import router as auth_router
+from api.aircraft import router as aircraft_router
 from api.cases import router as case_router
 from api.collaboration import router as collaboration_router
 from api.comments import router as comment_router
@@ -17,6 +18,7 @@ from api.system import router as system_router
 from api.uploads import router as upload_router
 from api.vector import router as vector_router
 from api.reference_layer import router as reference_layer_router
+from api.satellites import router as satellite_router
 
 
 def register_routers(app: FastAPI) -> None:
@@ -37,5 +39,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(vector_router)
     app.include_router(geo_search_router)
     app.include_router(hotspot_router)
+    app.include_router(aircraft_router)
+    app.include_router(satellite_router)
     app.include_router(system_router)
     app.include_router(reference_layer_router)

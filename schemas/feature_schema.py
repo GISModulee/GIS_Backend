@@ -17,7 +17,7 @@ class FeatureCreate(BaseModel):
     # Existing GeoJSON (Polygon, LineString, Point)
     geometry: Optional[Dict[str, Any]] = None
 
-    # New
+    # # New
     geometry_type: str = "Polygon"
 
     # Only used for circles

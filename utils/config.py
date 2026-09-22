@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     CI_BASE_URL: str
     MODULE_SLUG: str
 
+    OPENSKY_BASE_URL: str = "https://opensky-network.org/api"
+    OPENSKY_TIMEOUT_SECONDS: float = 10.0
+    AIRCRAFT_CACHE_TTL_SECONDS: int = 10
+
+    CELESTRAK_TLE_URL: str = "https://celestrak.org/pub/TLE/catalog.txt"
+    CELESTRAK_TIMEOUT_SECONDS: float = 15.0
+    SATELLITE_TLE_CACHE_TTL_SECONDS: int = 3600
+    SATELLITE_POSITION_CACHE_TTL_SECONDS: int = 5
+    SATELLITE_MAX_RESULTS: int = 500
+
     class Config:
         env_file = ".env"
 
