@@ -34,6 +34,7 @@ from utils.exceptions import (
     UnprocessableEntityError,
     ServiceUnavailableError,
 )
+from utils.constants import DEFAULT_MODULE_SLUG
 
 
 # ===================================================
@@ -42,7 +43,7 @@ from utils.exceptions import (
 # Single source of truth for turning a computed geometry into a saved
 # Feature. Creates the "Vector Layer N" (layer_type="vector") and
 # inserts the resulting Feature in the SAME transaction, using the
-# SAME layer_id returned by the layer creation — there is no seam
+# SAME layer_id returned by the layer creation ï¿½ there is no seam
 # where the two could drift apart, unlike having the layer created in
 # one place and the feature saved somewhere else.
 
@@ -85,6 +86,7 @@ async def _save_vector_result(
                 name=resolved_layer_name,
                 layer_type="vector",
                 visible=True,
+                module_slug=DEFAULT_MODULE_SLUG,
             )
             db.add(layer)
             db.flush()
@@ -116,6 +118,7 @@ async def _save_vector_result(
             feature_number=next_feature_number,
             layer_id=layer_id,
             case_id=case_id,
+            module_slug=DEFAULT_MODULE_SLUG,
             name=f"{operation_label.capitalize()} Result",
             geom=geom,
             geometry_type=geometry_type,

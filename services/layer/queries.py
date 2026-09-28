@@ -25,7 +25,7 @@ async def get_layers(db):
     try:
         return [await _dict(item) for item in db.scalars(select(Layer).order_by(Layer.id)).all()]
     except SQLAlchemyError as e:
-        raise ServiceUnavailableError(LAYERS_FETCH_FAILED) from e
+        raise ServiceUnavailableError(LAYER_FETCH_FAILED) from e
 
 
 async def get_layer(layer_id: int, db):
@@ -43,4 +43,4 @@ async def get_case_layers(case_id: int, db):
     except NotFoundError:
         raise
     except SQLAlchemyError as e:
-        raise ServiceUnavailableError(LAYERS_FETCH_FAILED) from e
+        raise ServiceUnavailableError(LAYER_FETCH_FAILED) from e

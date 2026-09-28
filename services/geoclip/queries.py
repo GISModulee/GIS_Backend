@@ -36,7 +36,7 @@ def get_images_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> 
 # GET FEATURES OF A LAYER (GEOJSON)
 # ===================================================
 # FIX: previously ran the query with no check that layer_id exists.
-# A nonexistent layer_id returned an empty FeatureCollection —
+# A nonexistent layer_id returned an empty FeatureCollection ï¿½
 # indistinguishable from a real layer with zero features. Now verifies
 # the layer exists first and raises NotFoundError (404) if not.
 async def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Session) -> dict:
@@ -56,6 +56,7 @@ async def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Sess
             Feature.id,
             Feature.layer_id,
             Feature.feature_number,
+            Feature.module_slug,
             Feature.name,
             Feature.properties,
             func.ST_AsGeoJSON(Feature.geom).label("geometry_json"),
@@ -80,6 +81,7 @@ async def get_features_by_layer(layer_id: int, limit: int, offset: int, db: Sess
             "id": row.id,
             "layer_id": row.layer_id,
             "feature_number": row.feature_number,
+            "module_slug": row.module_slug,
             "name": row.name,
             "geometry": geometry,
             "properties": row.properties or {},

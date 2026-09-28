@@ -39,6 +39,7 @@ from utils.exceptions import (
     UnsupportedMediaTypeError,
     UnprocessableEntityError,
 )
+from utils.constants import DEFAULT_MODULE_SLUG
 from services.upload_data.geometry import remove_z_coordinates
 
 SUPPORTED_GEOMETRY_TYPES = {
@@ -67,6 +68,7 @@ def _ingest_features(
     db,
     batch_size,
     on_batch_created=None,
+    module_slug: str = DEFAULT_MODULE_SLUG,
 ):
     """
     feature_iter yields (name, geometry, properties) tuples for each
@@ -98,6 +100,7 @@ def _ingest_features(
             "geometry": geometry,
             "geometry_type": geometry_type,
             "properties": properties,
+            "module_slug": module_slug,
         })
 
         if len(batch) >= batch_size:
@@ -108,6 +111,7 @@ def _ingest_features(
                 db,
                 created_by,
                 on_batch_created,
+                module_slug,
             )
             batch.clear()
 
@@ -119,19 +123,21 @@ def _ingest_features(
             db,
             created_by,
             on_batch_created,
+            module_slug,
         )
         batch.clear()
 
     return total_created
 
 
-def _create_and_emit_batch(batch, case_id, layer_id, db, created_by, on_batch_created=None):
+def _create_and_emit_batch(batch, case_id, layer_id, db, created_by, on_batch_created=None, module_slug: str = DEFAULT_MODULE_SLUG):
     created = create_features_batch(
         list(batch),
         case_id,
         layer_id,
         db,
         created_by,
+        module_slug,
     )
 
     if created and on_batch_created is not None:

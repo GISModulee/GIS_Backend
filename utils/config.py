@@ -26,11 +26,23 @@ class Settings(BaseSettings):
     CI_BASE_URL: str
     MODULE_SLUG: str
 
+    # External Email Dump Backend. Only the origin-IP endpoint is
+    # consumed by GIS; the full URL is always built from this base URL
+    # so no host/port is hard-coded in service logic. Empty is a valid
+    # configuration: the app still starts and only the Email Dump route
+    # reports a configuration error.
+    EMAIL_DUMP_API_BASE_URL: str = ""
+    EMAIL_DUMP_TIMEOUT_SECONDS: float = 30.0
+
     OPENSKY_BASE_URL: str = "https://opensky-network.org/api"
     OPENSKY_TIMEOUT_SECONDS: float = 10.0
     AIRCRAFT_CACHE_TTL_SECONDS: int = 10
 
-    CELESTRAK_TLE_URL: str = "https://celestrak.org/pub/TLE/catalog.txt"
+    # CelesTrak base feed URL. The requested group is appended as a
+    # query parameter by the service, so this must not already carry a
+    # GROUP value. The legacy static file under /pub/TLE/ now answers
+    # 403 and is no longer served.
+    CELESTRAK_TLE_URL: str = "https://celestrak.org/NORAD/elements/gp.php?FORMAT=tle"
     CELESTRAK_TIMEOUT_SECONDS: float = 15.0
     SATELLITE_TLE_CACHE_TTL_SECONDS: int = 3600
     SATELLITE_POSITION_CACHE_TTL_SECONDS: int = 5

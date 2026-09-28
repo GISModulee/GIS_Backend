@@ -1,6 +1,7 @@
 from schemas.feature_schema import FeatureCreate
 from services.feature.create import create_feature
 from services.feature.queries import get_feature
+from utils.constants import DEFAULT_MODULE_SLUG
 
 
 async def save_measurement_feature(
@@ -19,6 +20,7 @@ async def save_measurement_feature(
             name=f"{measurement_type.title()} measurement",
             geometry=geometry,
             geometry_type="measurement",
+            module_slug=DEFAULT_MODULE_SLUG,
             properties={
                 "measurement_type": measurement_type,
                 "distance_meters": distance_meters,

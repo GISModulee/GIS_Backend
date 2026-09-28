@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Boolean,
     UniqueConstraint,
+    CheckConstraint,
 )
 from sqlalchemy.orm import relationship, backref
 from sqlalchemy.sql import func
@@ -19,6 +20,12 @@ from models.reference_feature import ReferenceFeature
 
 
 from database.database import Base
+from utils.constants import ALLOWED_MODULE_SLUGS, MAX_MODULE_SLUG_LENGTH
+
+
+_MODULE_SLUG_ALLOWED_SQL = (
+    f"module_slug IN ({', '.join(repr(s) for s in sorted(ALLOWED_MODULE_SLUGS))})"
+)
 
 
 class Layer(Base):
@@ -29,6 +36,7 @@ class Layer(Base):
     name = Column(String(100), nullable=False)
     layer_type = Column(String(50))
     visible = Column(Boolean, default=True)
+    module_slug = Column(String(MAX_MODULE_SLUG_LENGTH), nullable=False, server_default="gis", index=True)
     created_at = Column(DateTime, server_default=func.now())
     file_hash = Column(String(64), nullable=True, index=True)
 
@@ -52,6 +60,10 @@ class Layer(Base):
         # now resolves a real case_id before inserting, so this should
         # never actually be relied on for NULL case_id layers.
         UniqueConstraint("case_id", "name", name="uq_layers_case_id_name"),
+        CheckConstraint(
+            _MODULE_SLUG_ALLOWED_SQL,
+            name="ck_layers_module_slug_allowed",
+        ),
     )
 
 
@@ -62,6 +74,7 @@ class Feature(Base):
     feature_number = Column(Integer, nullable=False)
     layer_id = Column(Integer, ForeignKey("layers.id", ondelete="CASCADE"))
     case_id = Column(Integer, nullable=False)
+    module_slug = Column(String(MAX_MODULE_SLUG_LENGTH), nullable=False, server_default="gis", index=True)
     name = Column(Text)
     geom = Column(Geometry(geometry_type="GEOMETRY", srid=4326))
 
@@ -89,6 +102,10 @@ class Feature(Base):
             "case_id",
             "feature_number",
             name="uq_feature_case_number",
+        ),
+        CheckConstraint(
+            _MODULE_SLUG_ALLOWED_SQL,
+            name="ck_features_module_slug_allowed",
         ),
     )
 

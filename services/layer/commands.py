@@ -18,6 +18,7 @@ from utils.constants import (
     LAYER_UPDATE_FAILED,
 )
 from utils.logger import logger
+from utils.constants import DEFAULT_MODULE_SLUG
 from utils.exceptions import NotFoundError, BadRequestError, ConflictError, ServiceUnavailableError
 from services.layer.common import _AUTO_NAME_PREFIXES, _duplicate, _duplicate_error, _integrity_error
 
@@ -29,7 +30,10 @@ async def create_layer(layer: dict, db):
             if layer.get("layer_type") == "group":
                 return {"success": True, "layer_id": existing_id, "message": "Reused existing layer"}
             raise await _duplicate_error(layer.get("name"))
-        record = Layer(**{key: layer[key] for key in ("case_id", "name", "layer_type", "visible")})
+        record = Layer(
+            **{key: layer[key] for key in ("case_id", "name", "layer_type", "visible")},
+            module_slug=layer.get("module_slug") or DEFAULT_MODULE_SLUG,
+        )
         db.add(record)
         db.commit()
         db.refresh(record)
@@ -56,11 +60,11 @@ async def get_import_layer_by_hash(case_id: int, file_hash: str, db):
         raise ServiceUnavailableError(LAYER_DUPLICATE_IMPORT_CHECK_FAILED) from e
 
 
-async def create_import_layer(case_id: int, name: str, file_hash: str, db):
+async def create_import_layer(case_id: int, name: str, file_hash: str, db, module_slug: str = DEFAULT_MODULE_SLUG):
     try:
         if await _duplicate(db, case_id, name) is not None:
             raise await _duplicate_error(name, True)
-        record = Layer(case_id=case_id, name=name, layer_type="import", visible=True, file_hash=file_hash)
+        record = Layer(case_id=case_id, name=name, layer_type="import", visible=True, file_hash=file_hash, module_slug=module_slug)
         db.add(record)
         db.commit()
         db.refresh(record)
@@ -76,7 +80,7 @@ async def create_import_layer(case_id: int, name: str, file_hash: str, db):
     return {"success": True, "layer_id": layer_id, "message": "Layer created successfully"}
 
 
-async def create_untitled_layer(case_id: int, db, layer_type: str = "auto"):
+async def create_untitled_layer(case_id: int, db, layer_type: str = "auto", module_slug: str = DEFAULT_MODULE_SLUG):
     """Create a system-numbered layer of the given layer_type.
 
     layer_type defaults to "auto" (regular feature creation without an
@@ -84,6 +88,11 @@ async def create_untitled_layer(case_id: int, db, layer_type: str = "auto"):
     layer to hold vector operation results (union/intersection/buffer/
     etc.), so it's visually and structurally distinct from ordinary
     auto layers in the case's layer list.
+
+    module_slug defaults to the GIS origin slug; callers that auto-create
+    a layer while creating a feature from another module (email-dump,
+    telecom-analysis) pass the feature's origin slug so the auto layer
+    inherits it.
     """
 
     prefix = _AUTO_NAME_PREFIXES.get(layer_type)
@@ -127,7 +136,8 @@ async def create_untitled_layer(case_id: int, db, layer_type: str = "auto"):
             case_id=case_id,
             name=f"{prefix} {next_number}",
             layer_type=layer_type,
-            visible=True
+            visible=True,
+            module_slug=module_slug,
         )
 
         db.add(record)

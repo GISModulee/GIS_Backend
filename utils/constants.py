@@ -1,3 +1,5 @@
+from typing import Literal, get_args
+
 STATUS_OK = 200
 STATUS_BAD_REQUEST = 400
 STATUS_UNAUTHORIZED = 401
@@ -50,6 +52,35 @@ DETAIL_UNEXPECTED_ERROR = "An unexpected error occurred. Please try again or con
  
 AUTH_CREDENTIALS_MISSING = "Authentication credentials were not provided."
 AUTH_ROLE_FORBIDDEN = "You do not have permission to perform this action."
+
+# ===================================================
+# MODULE SLUGS
+# ===================================================
+# Identifies which source module a layer/feature originated from.
+# This is separate from settings.MODULE_SLUG (the CI authentication
+# module), which is defined in utils/config.py and used by the CI
+# client. Slugs here are data-origin metadata, never auth metadata.
+DEFAULT_MODULE_SLUG = "gis"
+EMAIL_DUMP_MODULE_SLUG = "email-dump"
+TELECOM_ANALYSIS_MODULE_SLUG = "telecom-analysis"
+
+ALLOWED_MODULE_SLUGS = frozenset({
+    DEFAULT_MODULE_SLUG,
+    EMAIL_DUMP_MODULE_SLUG,
+    TELECOM_ANALYSIS_MODULE_SLUG,
+})
+
+MAX_MODULE_SLUG_LENGTH = 80
+
+# Fine-grained module_slug validation errors, surfaced to API clients
+# so each failure mode returns a specific message.
+MODULE_SLUG_REQUIRED = "module_slug is required"
+MODULE_SLUG_EMPTY = "module_slug must not be empty or whitespace-only"
+MODULE_SLUG_TOO_LONG = (
+    f"module_slug must not exceed {MAX_MODULE_SLUG_LENGTH} characters"
+)
+MODULE_SLUG_NOT_FOUND = "Module slug not found"
+MODULE_SLUG_INVALID = "Invalid module slug"
  
 CASE_NOT_FOUND = "Case not found"
 CASE_ID_REQUIRED = "case_id is required"
@@ -173,3 +204,67 @@ GEO_SEARCH_BATCHES_FAILED = "All place batches failed"
 GEO_SEARCH_GDELT_FAILED = "GDELT connection failed on HTTPS and HTTP endpoints"
 GEO_SEARCH_GDELT_RATE_LIMITED = "GDELT allows one request every five seconds"
 GEO_SEARCH_GOVERNMENT_TIMEOUT = "Government search timed out"
+ 
+# ===================================================
+# EMAIL DUMP INTEGRATION
+# ===================================================
+# GIS is a proxy for the external Email Dump Backend; it owns no email
+# data of its own. Only the origin-IP endpoint is consumed, and its URL
+# is always built from settings.EMAIL_DUMP_API_BASE_URL so the provider
+# host is configurable and never hard-coded in service logic.
+EMAIL_DUMP_ORIGIN_IPS_PATH = "/api/emails/single/origin-ips"
+
+# One layer per upstream email_id, named deterministically so repeat
+# imports reuse the same case-scoped layer instead of duplicating it.
+EMAIL_DUMP_LAYER_TYPE = "email"
+EMAIL_DUMP_LAYER_NAME_TEMPLATE = "Email {email_id}"
+EMAIL_DUMP_FEATURE_NAME_TEMPLATE = "IP {ip}"
+
+EMAIL_DUMP_NOT_CONFIGURED = (
+    "Email Dump integration is not configured. Set EMAIL_DUMP_API_BASE_URL."
+)
+
+# ===================================================
+# SATELLITE FEEDS
+# ===================================================
+# CelesTrak serves all GP data from a single query-string endpoint. The
+# legacy static catalog file under /pub/TLE/ is no longer served, so the
+# feed URL is configured as a base (settings.CELESTRAK_TLE_URL) and the
+# requested group is always appended by the service rather than stored
+# per group. This keeps the host configurable and the group list the
+# single source of truth for both validation and URL construction.
+#
+# The Literal is the validation contract: FastAPI rejects an unknown
+# group with 422 before the service is reached. SATELLITE_GROUPS is
+# derived from it so the whitelist can never drift from the type.
+SatelliteGroup = Literal[
+    "active",
+    "stations",
+    "visual",
+    "weather",
+    "gps-ops",
+    "starlink",
+]
+
+SATELLITE_GROUPS: frozenset[str] = frozenset(get_args(SatelliteGroup))
+
+# Group used when the request omits the parameter, preserving the
+# behaviour of the original full-catalog feed.
+DEFAULT_SATELLITE_GROUP = "active"
+
+# CelesTrak regenerates GP data on a coarse cadence and answers requests
+# made inside that window with HTTP 403 and a plain-text body explaining
+# that no newer data exists. This is a successful "nothing new" answer,
+# not an outage: the service reuses the last good TLE set instead of
+# surfacing a 503 to the client.
+CELESTRAK_COOLDOWN_MARKER = "has not updated since your last successful"
+CELESTRAK_COOLDOWN_STATUS = 403
+EMAIL_DUMP_TIMEOUT = "Email Dump service timed out. Please try again."
+EMAIL_DUMP_UNAVAILABLE = "Email Dump service is unavailable. Please try again."
+EMAIL_DUMP_RATE_LIMITED = (
+    "Email Dump service is rate limiting requests. Please try again later."
+)
+EMAIL_DUMP_UNAUTHORIZED = "Email Dump service rejected the provided credentials."
+EMAIL_DUMP_NOT_FOUND = "No Email Dump origin-IP data was found for this case."
+EMAIL_DUMP_INVALID_RESPONSE = "Email Dump service returned an invalid response."
+EMAIL_DUMP_IMPORT_FAILED = "Failed to import Email Dump origin IPs"

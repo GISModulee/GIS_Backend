@@ -7,6 +7,7 @@ from api.collaboration import router as collaboration_router
 from api.comments import router as comment_router
 from api.comments_read import router as comment_read_router
 from api.comments_ws import router as comment_ws_router
+from api.email_dump import router as email_dump_router
 from api.features import router as feature_router
 from api.features_read import router as feature_read_router
 from api.features_ws import router as feature_ws_router
@@ -39,6 +40,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(vector_router)
     app.include_router(geo_search_router)
     app.include_router(hotspot_router)
+    app.include_router(email_dump_router)
     app.include_router(aircraft_router)
     app.include_router(satellite_router)
     app.include_router(system_router)

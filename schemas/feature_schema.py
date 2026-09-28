@@ -1,7 +1,18 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Dict, Any, Literal, Optional
+
+from utils.constants import (
+    ALLOWED_MODULE_SLUGS,
+    DEFAULT_MODULE_SLUG,
+    MAX_MODULE_SLUG_LENGTH,
+    MODULE_SLUG_EMPTY,
+    MODULE_SLUG_INVALID,
+    MODULE_SLUG_NOT_FOUND,
+    MODULE_SLUG_REQUIRED,
+    MODULE_SLUG_TOO_LONG,
+)
 
 
 # ===================================================
@@ -13,6 +24,11 @@ class FeatureCreate(BaseModel):
     layer_id: Optional[int] = None
 
     name: str
+
+    # Origin module that created this feature. Defaults to gis so
+    # existing GIS routes keep working unchanged; email-dump and
+    # telecom-analysis integrations set it explicitly.
+    module_slug: str = DEFAULT_MODULE_SLUG
 
     # Existing GeoJSON (Polygon, LineString, Point)
     geometry: Optional[Dict[str, Any]] = None
@@ -32,6 +48,22 @@ class FeatureCreate(BaseModel):
     # feature_service.create_feature(feature, created_by) instead —
     # accepting it here would let any client claim any user created
     # a feature.
+
+    @field_validator("module_slug", mode="before")
+    @classmethod
+    def _validate_module_slug(cls, value):
+        if value is None:
+            raise ValueError(MODULE_SLUG_REQUIRED)
+        if not isinstance(value, str):
+            raise ValueError(MODULE_SLUG_INVALID)
+        slug = value.strip()
+        if not slug:
+            raise ValueError(MODULE_SLUG_EMPTY)
+        if len(slug) > MAX_MODULE_SLUG_LENGTH:
+            raise ValueError(MODULE_SLUG_TOO_LONG)
+        if slug not in ALLOWED_MODULE_SLUGS:
+            raise ValueError(MODULE_SLUG_NOT_FOUND)
+        return slug
 
 
 # ===================================================
@@ -55,6 +87,7 @@ class FeatureResponse(BaseModel):
     feature_number: int
     case_id: int
     layer_id: int | None = None
+    module_slug: str
     name: str
     geometry_type: str
     radius: float | None = None
@@ -75,6 +108,7 @@ class FeatureSummaryResponse(BaseModel):
     feature_number: int
     case_id: int
     layer_id: int | None = None
+    module_slug: str
     has_comments: bool = False
 
 

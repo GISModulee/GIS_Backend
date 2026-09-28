@@ -13,7 +13,7 @@ from services.geoclip.processor import FileUtils, ImageProcessor
 from services.geoclip.validator import FileValidator
 from services.layer.layer_service import create_layer, patch_layer
 from utils.config import settings
-from utils.constants import DATABASE_SAVE_FAILED, GEOCLIP_NO_PREDICTIONS, GEOCLIP_PREDICTION_FAILED, IMAGE_READ_FAILED
+from utils.constants import DATABASE_SAVE_FAILED, DEFAULT_MODULE_SLUG, GEOCLIP_NO_PREDICTIONS, GEOCLIP_PREDICTION_FAILED, IMAGE_READ_FAILED
 from utils.exceptions import BadRequestError, ServiceUnavailableError, UnprocessableEntityError
 from utils.logger import logger
 
@@ -85,6 +85,7 @@ async def upload_image(
         "name": layer_name if layer_name else "__pending__",
         "layer_type": "geoclip_prediction",
         "visible": True,
+        "module_slug": DEFAULT_MODULE_SLUG,
     }, db)
     layer_id = layer_result["layer_id"]
     
@@ -112,6 +113,7 @@ async def upload_image(
             layer_id=layer_id,
             name=feature_name,
             geometry_type="Circle",
+            module_slug=DEFAULT_MODULE_SLUG,
             center={
                 "lat": pred["lat"],
                 "lng": pred["lon"],

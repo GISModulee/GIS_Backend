@@ -30,6 +30,21 @@ class AsyncTTLCache(Generic[T]):
             return None
         return self._entry.value
 
+    def get_stale(self) -> T | None:
+        """Return the last known value regardless of expiry.
+
+        Used when an upstream has no newer data to offer and a slightly
+        stale value is preferable to failing the request.
+        """
+        if self._entry is None:
+            return None
+        return self._entry.value
+
+    def expire(self) -> None:
+        """Mark the current entry stale without discarding its value."""
+        if self._entry is not None:
+            self._entry.expires_at = 0.0
+
     async def get_or_refresh(self, refresh: Callable[[], Awaitable[T]]) -> T:
         cached = self.get_if_fresh()
         if cached is not None:

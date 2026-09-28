@@ -14,7 +14,7 @@ from services.feature.feature_service import create_feature
 from services.hotspots.categories import selected_categories
 from services.hotspots.models import PlanetOsmPoint, PlanetOsmPolygon
 from services.layer.layer_service import create_layer
-from utils.constants import FEATURE_NOT_FOUND, LAYER_NOT_FOUND
+from utils.constants import DEFAULT_MODULE_SLUG, FEATURE_NOT_FOUND, LAYER_NOT_FOUND
 from utils.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
 from utils.logger import logger
 
@@ -74,6 +74,7 @@ async def save_hotspots(request: HotspotSaveRequest, db: Session, current_user: 
                 name=hotspot.name or f"Hotspot {hotspot.osm_id}",
                 geometry={"type": "Point", "coordinates": hotspot.coordinates},
                 geometry_type="Point",
+                module_slug=DEFAULT_MODULE_SLUG,
                 properties={
                     "source": "mapserver",
                     "osm_id": hotspot.osm_id,
@@ -376,7 +377,7 @@ async def _target_layer_id(request: HotspotSaveRequest, db: Session) -> int:
         return existing
 
     created = await create_layer(
-        {"case_id": request.case_id, "name": layer_name, "layer_type": "hotspot", "visible": True},
+        {"case_id": request.case_id, "name": layer_name, "layer_type": "hotspot", "visible": True, "module_slug": DEFAULT_MODULE_SLUG},
         db,
     )
     return created["layer_id"]

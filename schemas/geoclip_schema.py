@@ -36,6 +36,7 @@ class FeatureGeoJSON(BaseModel):
     id: int
     layer_id: int
     feature_number: int
+    module_slug: str
     name: str | None = None
     geometry: Dict[str, Any]  
     properties: Dict[str, Any]

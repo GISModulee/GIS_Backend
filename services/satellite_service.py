@@ -1,31 +1,77 @@
 import math
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 
 import httpx
 
 from schemas.live_data_schema import GeoJSONFeature, GeoJSONFeatureCollection, PointGeometry, SatellitePosition
 from services.live_cache import AsyncTTLCache
 from utils.config import settings
+from utils.constants import (
+    CELESTRAK_COOLDOWN_MARKER,
+    CELESTRAK_COOLDOWN_STATUS,
+    DEFAULT_SATELLITE_GROUP,
+    SATELLITE_GROUPS,
+)
 from utils.exceptions import BadRequestError, GatewayTimeoutError, ServiceUnavailableError
 from utils.logger import logger
 
 
+class _FeedCooldown(Exception):
+    """Upstream has no newer TLE data for the requested group.
+
+    Internal control flow only. CelesTrak regenerates GP data on a coarse
+    cadence and reports requests made inside that window as a 403. The
+    caller reuses the last good TLE set; this never reaches a client.
+    """
+
+
 class SatelliteService:
     def __init__(self):
-        self._tle_cache = AsyncTTLCache[list[tuple[str, str, str]]](
-            settings.SATELLITE_TLE_CACHE_TTL_SECONDS
+        # One cache per group per tier. Keyed caches rather than a single
+        # slot so that a cold or slow group (starlink) neither blocks nor
+        # invalidates the other groups, and each group refreshes on its
+        # own clock. The group set is a fixed whitelist, so these dicts
+        # are bounded.
+        self._tle_caches: dict[str, AsyncTTLCache[list[tuple[str, str, str]]]] = {}
+        self._position_caches: dict[str, AsyncTTLCache[list[SatellitePosition]]] = {}
+
+    def _tle_cache_for(self, group: str) -> AsyncTTLCache[list[tuple[str, str, str]]]:
+        return self._tle_caches.setdefault(
+            group,
+            AsyncTTLCache[list[tuple[str, str, str]]](
+                settings.SATELLITE_TLE_CACHE_TTL_SECONDS
+            ),
         )
-        self._position_cache = AsyncTTLCache[list[SatellitePosition]](
-            settings.SATELLITE_POSITION_CACHE_TTL_SECONDS
+
+    def _position_cache_for(self, group: str) -> AsyncTTLCache[list[SatellitePosition]]:
+        return self._position_caches.setdefault(
+            group,
+            AsyncTTLCache[list[SatellitePosition]](
+                settings.SATELLITE_POSITION_CACHE_TTL_SECONDS
+            ),
         )
+
+    def _tle_url_for_group(self, group: str) -> str:
+        if group not in SATELLITE_GROUPS:
+            raise BadRequestError(
+                f"Unsupported satellite group: {group}. "
+                f"Expected one of {', '.join(sorted(SATELLITE_GROUPS))}."
+            )
+        base = settings.CELESTRAK_TLE_URL
+        separator = "&" if "?" in base else "?"
+        return f"{base}{separator}{urlencode({'GROUP': group})}"
 
     async def list_satellites(
         self,
         bbox: str | None = None,
         limit: int | None = None,
+        group: str = DEFAULT_SATELLITE_GROUP,
     ) -> list[SatellitePosition]:
         max_results = min(limit or settings.SATELLITE_MAX_RESULTS, settings.SATELLITE_MAX_RESULTS)
-        positions = await self._position_cache.get_or_refresh(self._propagate_positions)
+        positions = await self._position_cache_for(group).get_or_refresh(
+            lambda: self._propagate_positions(group)
+        )
         filtered = self._filter_bbox(positions, bbox) if bbox else positions
         return filtered[:max_results]
 
@@ -33,8 +79,9 @@ class SatelliteService:
         self,
         bbox: str | None = None,
         limit: int | None = None,
+        group: str = DEFAULT_SATELLITE_GROUP,
     ) -> GeoJSONFeatureCollection:
-        satellites = await self.list_satellites(bbox=bbox, limit=limit)
+        satellites = await self.list_satellites(bbox=bbox, limit=limit, group=group)
         return GeoJSONFeatureCollection(
             features=[
                 GeoJSONFeature(
@@ -45,44 +92,79 @@ class SatelliteService:
             ]
         )
 
-    async def _propagate_positions(self) -> list[SatellitePosition]:
+    async def _propagate_positions(self, group: str) -> list[SatellitePosition]:
         try:
             import sgp4  # noqa: F401
         except ImportError:
             logger.error("Satellite propagation dependency missing: sgp4")
             raise ServiceUnavailableError("Satellite propagation dependency is not installed")
 
-        tle_records = await self._tle_cache.get_or_refresh(self._fetch_tles)
+        tle_cache = self._tle_cache_for(group)
+        try:
+            tle_records = await tle_cache.get_or_refresh(lambda: self._fetch_tles(group))
+        except _FeedCooldown:
+            tle_records = tle_cache.get_stale()
+            if tle_records is None:
+                logger.warning("CelesTrak cooldown with no cached TLE | group=%s", group)
+                raise ServiceUnavailableError("CelesTrak satellite feed is unavailable")
+            logger.info("CelesTrak cooldown, serving cached TLE | group=%s", group)
+
         now = datetime.now(timezone.utc)
         positions = []
+        failed = 0
         for name, line1, line2 in tle_records[: settings.SATELLITE_MAX_RESULTS]:
             position = self._propagate(name, line1, line2, now)
-            if position is not None:
+            if position is None:
+                failed += 1
+            else:
                 positions.append(position)
-        logger.info("Satellite positions propagated | count=%s", len(positions))
+        if failed:
+            logger.warning("Satellite propagation dropped records | group=%s | dropped=%s", group, failed)
+        logger.info("Satellite positions propagated | group=%s | count=%s", group, len(positions))
         return positions
 
-    async def _fetch_tles(self) -> list[tuple[str, str, str]]:
+    async def _fetch_tles(self, group: str) -> list[tuple[str, str, str]]:
+        url = self._tle_url_for_group(group)
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(settings.CELESTRAK_TIMEOUT_SECONDS)) as client:
-                response = await client.get(settings.CELESTRAK_TLE_URL)
+                response = await client.get(url)
+                if self._is_cooldown(response):
+                    logger.info("CelesTrak reports no new data | group=%s", group)
+                    raise _FeedCooldown()
                 response.raise_for_status()
                 text = response.text
+        except _FeedCooldown:
+            raise
         except httpx.TimeoutException as exc:
-            logger.warning("CelesTrak request timed out | error=%s", exc)
+            logger.warning("CelesTrak request timed out | group=%s | error=%s", group, exc)
             raise GatewayTimeoutError("CelesTrak TLE request timed out")
         except httpx.HTTPStatusError as exc:
-            logger.warning("CelesTrak HTTP error | status=%s", exc.response.status_code)
+            logger.warning("CelesTrak HTTP error | group=%s | status=%s", group, exc.response.status_code)
             raise ServiceUnavailableError("CelesTrak satellite feed is unavailable")
         except httpx.RequestError as exc:
-            logger.warning("CelesTrak request failed | error=%s", exc)
+            logger.warning("CelesTrak request failed | group=%s | error=%s", group, exc)
             raise ServiceUnavailableError("CelesTrak satellite feed is unavailable")
 
         records = self._parse_tle(text)
         if not records:
             raise ServiceUnavailableError("CelesTrak satellite feed returned no valid TLE records")
-        logger.info("CelesTrak TLE records fetched | count=%s", len(records))
+        logger.info("CelesTrak TLE records fetched | group=%s | count=%s", group, len(records))
         return records
+
+    @staticmethod
+    def _is_cooldown(response: httpx.Response) -> bool:
+        """Distinguish CelesTrak's "no new data" 403 from a blocked request.
+
+        The cooldown response is plain text describing the pending
+        regeneration; a blocked request returns an HTML error page. Only
+        the former is safe to treat as a successful empty update.
+        """
+        if response.status_code != CELESTRAK_COOLDOWN_STATUS:
+            return False
+        content_type = response.headers.get("content-type", "")
+        if "text/plain" not in content_type:
+            return False
+        return CELESTRAK_COOLDOWN_MARKER in response.text
 
     def _parse_tle(self, text: str) -> list[tuple[str, str, str]]:
         lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -124,7 +206,7 @@ class SatelliteService:
                 return None
             return SatellitePosition(
                 name=name,
-                norad_id=line1[2:7].strip() or None,
+                norad_id=self._extract_norad_id(line1),
                 latitude=lat,
                 longitude=lon,
                 altitude_km=altitude,
@@ -133,6 +215,24 @@ class SatelliteService:
         except Exception as exc:
             logger.debug("Satellite propagation skipped | name=%s | error=%s", name, exc)
             return None
+
+    @staticmethod
+    def _extract_norad_id(line1: str) -> str | None:
+        """Read the catalog number out of a TLE line 1.
+
+        Legacy TLEs carry a 5-digit catalog number in columns 3-7. Objects
+        cataloged after the 5-digit space was exhausted carry 6 digits,
+        which shifts every following column, so a fixed-width slice would
+        silently truncate them. The number is instead read from the
+        whitespace-delimited field and the trailing classification letter
+        removed, which is correct for both widths.
+        """
+        fields = line1.split()
+        if len(fields) < 2:
+            return None
+        field = fields[1]
+        number = field[:-1] if field[-1:].isalpha() else field
+        return number if number.isdigit() else None
 
     def _eci_to_geodetic(self, position_km, jd_ut1: float) -> tuple[float, float, float]:
         x, y, z = position_km

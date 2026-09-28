@@ -47,6 +47,37 @@ async def add_layer(layer: LayerCreate, db: Session = Depends(get_db), access_to
     return result
 
 
+@router.post("/case/{case_id}", response_model=LayerCreateResponse)
+async def add_case_layer(
+    case_id: int,
+    layer: LayerCreate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles_for_case(CAN_WRITE)),
+):
+    logger.info(
+        f"POST /layers/case/{case_id} | user_id={current_user['user_id']} | "
+        f"role={current_user['role']} | body={layer.model_dump()}"
+    )
+
+    payload = layer.model_dump()
+    payload["case_id"] = case_id
+
+    result = await create_layer(payload, db)
+
+    created_layer = await get_layer(result["layer_id"], db)
+
+    message = {
+        "event": "layer.created",
+        "case_id": case_id,
+        "layer": created_layer,
+    }
+
+    await layer_connection_manager.broadcast(case_id, message)
+    await feature_connection_manager.broadcast(case_id, message)
+
+    return result
+
+
 @router.get("", response_model=list[LayerResponse])
 async def list_layers(case_id: int, db: Session = Depends(get_db), access_token: str = Depends(get_access_token)):
     current_user = await authorize_case(access_token, case_id)

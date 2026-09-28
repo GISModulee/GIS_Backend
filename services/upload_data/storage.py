@@ -39,6 +39,7 @@ from utils.exceptions import (
     UnsupportedMediaTypeError,
     UnprocessableEntityError,
 )
+from utils.constants import DEFAULT_MODULE_SLUG
 
 
 # ===================================================
@@ -115,7 +116,7 @@ def _check_duplicate_import(case_id, file_hash, source_label, db):
         "imported_features": 0,
         "message": "This file was already imported into this case — no new layer created."
     }
-def _create_import_layer(case_id, name, file_hash, db):
+def _create_import_layer(case_id, name, file_hash, db, module_slug: str = DEFAULT_MODULE_SLUG):
     try:
         existing_id = db.scalar(
             select(Layer.id).where(
@@ -137,6 +138,7 @@ def _create_import_layer(case_id, name, file_hash, db):
             layer_type="import",
             visible=True,
             file_hash=file_hash,
+            module_slug=module_slug,
         )
         db.add(record)
         db.commit()

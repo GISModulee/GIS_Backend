@@ -33,6 +33,7 @@ from utils.exceptions import (
     UnprocessableEntityError,
     ServiceUnavailableError,
 )
+from utils.constants import DEFAULT_MODULE_SLUG
 
 from services.layer.layer_service import create_untitled_layer, get_layer
 
@@ -41,8 +42,8 @@ from services.layer.layer_service import create_untitled_layer, get_layer
 # HELPERS
 # ===================================================
 
-async def _create_auto_layer(case_id: int, db):
-    return await create_untitled_layer(case_id, db)
+async def _create_auto_layer(case_id: int, db, module_slug: str = DEFAULT_MODULE_SLUG):
+    return await create_untitled_layer(case_id, db, module_slug=module_slug)
 
 
 async def _row_to_feature_dict(row):
@@ -64,6 +65,7 @@ async def _row_to_feature_dict(row):
         "feature_number": row.feature_number,
         "case_id": row.case_id,
         "layer_id": row.layer_id,
+        "module_slug": row.module_slug,
         "name": row.name,
         "geometry_type": geometry_type,
         "radius": row.radius,
@@ -82,6 +84,7 @@ async def _row_to_feature_summary_dict(row):
         "feature_number": row.feature_number,
         "case_id": row.case_id,
         "layer_id": row.layer_id,
+        "module_slug": row.module_slug,
         "has_comments": bool(row.has_comments),
     }
 
@@ -104,6 +107,7 @@ async def _feature_select():
         Feature.feature_number,
         Feature.case_id,
         Feature.layer_id,
+        Feature.module_slug,
         Feature.name,
         Feature.geometry_type,
         Feature.radius,

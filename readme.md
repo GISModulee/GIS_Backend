@@ -29,7 +29,7 @@ config/              Runtime configuration files, including hotspot categories
 
 ## Environment
 
-Create a `.env` file in the project root.
+Copy `.env.example` to `.env` in the project root and adjust the values. `.env.example` lists every supported setting, including the optional ones.
 
 ```env
 DATABASE_URL=postgresql://postgres:password@localhost:5432/geobackend
@@ -49,9 +49,17 @@ ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 SECRET_KEY=change_this_secret
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=120
+
+CI_BASE_URL=http://192.168.6.63:8014
+MODULE_SLUG=spatial-geographical-analysis
+
+EMAIL_DUMP_API_BASE_URL=http://192.168.6.63:8002
+EMAIL_DUMP_TIMEOUT_SECONDS=30
 ```
 
 `DATABASE_URL` is the main application database. `MAPSERVER_DATABASE_URL` is optional for the app in general, but required for hotspot search.
+
+`EMAIL_DUMP_API_BASE_URL` points at the external Email Dump Backend. It is optional: when it is empty the application still starts, and only the Email Dump route reports a configuration error. `EMAIL_DUMP_TIMEOUT_SECONDS` bounds the upstream request.
 
 ## Setup
 
@@ -83,6 +91,57 @@ The correct libmagic provider is selected automatically per platform by `require
   ```
 
   (On some distributions/older packages the development package `libmagic-dev` may be required instead.) `pip install -r requirements.txt` does **not** install the Linux system library itself.
+
+## Module Slugs
+
+`module_slug` is metadata identifying which source module created a layer or feature. It is **not** the CI authentication module (`settings.MODULE_SLUG` from `.env`, used when talking to Central Intelligence).
+
+Supported slugs:
+
+| Slug                | Origin                                          |
+| ------------------- | ----------------------------------------------- |
+| `gis`               | Core GIS operations (manual layers, imports, measurements, GeoCLIP, hotspots, vector operations) |
+| `email-dump`        | Email intelligence integrations                 |
+| `telecom-analysis`  | Telecom / phone-number analysis integrations     |
+
+Rules:
+
+- Manual layer creation must send a valid `module_slug`; `null`, empty, whitespace-only, or unknown values are rejected (`gis / email-dump / telecom-analysis` only).
+- Automatically created layers inherit the `module_slug` of the feature being created when no `layer_id` is supplied. Ordinary GIS-created features use `gis`.
+- Feature `module_slug` defaults to `gis` and supports the same whitelist. The feature/layer DB columns are NOT NULL, indexed, and constrained by CHECK constraints matching the application whitelist.
+- Removing the columns is handled by the migration's downgrade; applying `alembic upgrade head` backfills any pre-existing rows to `gis` before enforcing NOT NULL.
+
+## Email and Phone Properties
+
+Email and phone values are independent and live inside the existing feature `properties` JSON — they may be present separately or together. `module_slug` identifies the originating module, not the presence of an email or phone number.
+
+```json
+{
+  "module_slug": "email-dump",
+  "properties": {
+    "email": "person@example.com"
+  }
+}
+```
+
+```json
+{
+  "module_slug": "telecom-analysis",
+  "properties": {
+    "phone_number": "+919876543210"
+  }
+}
+```
+
+```json
+{
+  "module_slug": "telecom-analysis",
+  "properties": {
+    "email": "person@example.com",
+    "phone_number": "+919876543210"
+  }
+}
+```
 
 ## Database
 
@@ -168,6 +227,7 @@ DELETE /cases/{case_id}
 
 ```text
 POST   /layers
+POST   /layers/case/{case_id}
 GET    /layers
 GET    /layers/case/{case_id}
 GET    /layers/case/{case_id}/{layer_id}
@@ -175,6 +235,19 @@ PUT    /layers/case/{case_id}/{layer_id}
 PATCH  /layers/case/{case_id}/{layer_id}
 DELETE /layers/case/{case_id}/{layer_id}
 ```
+
+Manual layer creation requires the origin `module_slug` in the request body:
+
+```json
+{
+  "name": "Email Locations",
+  "layer_type": "email",
+  "module_slug": "email-dump",
+  "visible": true
+}
+```
+
+`POST /layers/case/{case_id}` takes `case_id` as a path parameter (not the body), validates the bearer token, the user's access to the case, and the layer write role, and broadcasts the `layer.created` WebSocket event. `POST /layers` also requires `module_slug`.
 
 ### Features
 
@@ -191,6 +264,45 @@ DELETE /cases/{case_id}/layers/{layer_id}/features/{feature_id}
 ```
 
 Features are stored in SRID 4326. Geometry is written through PostGIS functions and returned as GeoJSON.
+
+### Satellites
+
+```text
+GET    /api/satellites
+```
+
+Token-protected live satellite positions, read from CelesTrak and propagated with SGP4. Returns a GeoJSON `FeatureCollection`; each feature is a `Point` whose properties are the satellite name, NORAD ID, altitude in km, and the propagation timestamp.
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `bbox` | none | Post-propagation filter, `minLon,minLat,maxLon,maxLat`. Invalid values return 400. |
+| `limit` | 500 | Maximum features returned, capped by `SATELLITE_MAX_RESULTS`. |
+| `group` | `active` | CelesTrak element group. An unknown value returns 422. |
+
+Supported `group` values:
+
+| Value | Contents |
+| --- | --- |
+| `active` | Everything in the current active catalog. The default. |
+| `stations` | Crewed space stations and visiting vehicles. |
+| `visual` | The brightest objects. |
+| `weather` | Weather satellites. |
+| `gps-ops` | The GPS operational constellation. |
+| `starlink` | The Starlink constellation. |
+
+Omitting `group` keeps the previous behaviour and returns the full active catalog, so existing clients are unaffected.
+
+```http
+GET /api/satellites?group=stations&bbox=70,15,80,20&limit=100
+```
+
+Feeds are cached per group: TLE data for an hour, propagated positions for five seconds, so a client cycling through groups does not multiply upstream requests. CelesTrak regenerates its data on a two-hour cadence and answers requests made inside that window with `403` and a "no new data" body. That is treated as a successful no-op and the last good TLE set is reused, so a cooldown never surfaces as an error. It only returns 503 if the feed is unavailable and nothing has been cached yet.
+
+The feed URL is `settings.CELESTRAK_TLE_URL` plus a `GROUP` query parameter. The legacy static `pub/TLE/catalog.txt` file is no longer served by CelesTrak and answers `403`; the default is the query-string endpoint.
+
+Note that `starlink` contains several thousand objects while the propagation input is capped at `SATELLITE_MAX_RESULTS` (500). The cap is applied before propagation, so a large group returns the first 500 records in feed order rather than the whole constellation.
+
+`GET /api/aircraft` is the sibling live-data endpoint and follows the same GeoJSON and caching conventions, with a `bbox` filter instead of `group`.
 
 ## File Import
 
@@ -286,6 +398,188 @@ Hotspot priority rules are configured in:
 ```text
 config/hotspot_categories.json
 ```
+
+## Email Dump Origin IPs
+
+```text
+Frontend  →  GIS Backend  →  Email Dump Backend
+```
+
+The GIS backend is the integration/proxy layer. It does **not** replace or duplicate the Email Dump backend: email analysis, email records, email IDs, risk analysis, origin-IP analysis, and Email Dump authentication all stay in the Email Dump backend. The frontend never calls the Email Dump backend directly — it calls the GIS route, which forwards the request upstream and converts the answer into GIS layers and features.
+
+### Routes
+
+```text
+GIS route (used by the frontend):
+GET /cases/{case_id}/email-dump/origin-ips
+
+External Email Dump endpoint (called by GIS only):
+GET {EMAIL_DUMP_API_BASE_URL}/api/emails/single/origin-ips/{case_id}
+```
+
+The provider URL is always built from `settings.EMAIL_DUMP_API_BASE_URL`; the host and port are never hard-coded in service logic. Only the path segment is fixed.
+
+### Configuration
+
+```env
+EMAIL_DUMP_API_BASE_URL=http://192.168.6.63:8002
+EMAIL_DUMP_TIMEOUT_SECONDS=30
+```
+
+`EMAIL_DUMP_API_BASE_URL` defaults to `""`. The application starts without it; calling the Email Dump route then returns a clear configuration error.
+
+### Authentication
+
+The route uses the standard GIS authentication: the bearer token is validated by Central Intelligence, case access is validated, and the write role is required because the import creates layers and features.
+
+```python
+access_token = Depends(get_access_token)
+current_user  = Depends(require_roles_for_case(CAN_WRITE))
+```
+
+The caller's token is forwarded upstream so Email Dump applies its own authorization:
+
+```http
+Authorization: Bearer <current-token>
+```
+
+GIS never mints, stores, or logs provider credentials.
+
+### Query parameters
+
+The route accepts every parameter documented by the Email Dump Backend and forwards only the ones that were provided:
+
+```text
+view_type  target_id  dump_id  ip_type  limit  keyword  isp  country  risk_level  is_suspicious
+```
+
+### email_id → layer
+
+Every item in the upstream `data` array maps to one GIS layer, named deterministically:
+
+```text
+layer_name = f"Email {email_id}"
+```
+
+```json
+{
+  "case_id": 123,
+  "name": "Email 101",
+  "layer_type": "email",
+  "module_slug": "email-dump",
+  "visible": true
+}
+```
+
+Before creating anything, GIS looks for an existing layer matching `case_id` + `name` + `module_slug` and reuses it (`layers_reused`) instead of creating a duplicate (`layers_created`). Layers are case-scoped: the same `email_id` in a different case gets its own layer.
+
+### IP → feature
+
+Every valid IP coordinate becomes one Point feature in that email's layer:
+
+```json
+{
+  "name": "IP 8.8.8.8",
+  "geometry_type": "Point",
+  "geometry": { "type": "Point", "coordinates": [73.8567, 18.5204] },
+  "module_slug": "email-dump",
+  "properties": {
+    "email_id": 101,
+    "ip": "8.8.8.8",
+    "ip_type": "origin",
+    "count": 2,
+    "email_address": "person@example.com",
+    "risk_level": "safe",
+    "is_suspicious": false,
+    "country": "India",
+    "isp": "Example ISP",
+    "first_seen": "2026-01-01T00:00:00+00:00",
+    "last_seen": "2026-01-02T00:00:00+00:00"
+  }
+}
+```
+
+- Coordinates are stored as `[longitude, latitude]` in SRID 4326 through the existing PostGIS handling.
+- Latitude must be within `-90..90` and longitude within `-180..180`.
+- Missing or invalid coordinates create no geometry and are counted in `skipped_coordinates`.
+- The original `email_id` and `ip` are preserved in `properties` and are the feature's identity for duplicate detection.
+- Features are written through the existing batch feature service.
+
+### module_slug
+
+Every layer and feature created by this integration uses `module_slug = "email-dump"`, validated against the centralized whitelist in `utils/constants.py` (`gis` / `email-dump` / `telecom-analysis`). The response never contains a null `module_slug`.
+
+### Duplicate behavior
+
+The import is idempotent and case-scoped:
+
+- **Layer reuse** — match on `case_id` + layer name + `module_slug`.
+- **Feature reuse** — match on `layer_id` + `email_id` in `properties` + `ip` in `properties`.
+
+A repeated import of the same data creates no duplicates; it only increments `layers_reused` / `features_reused`.
+
+### WebSocket events
+
+New layers broadcast `layer.created` and newly created features broadcast `feature.batch_created` through the existing layer and feature managers. Nothing new is registered.
+
+### Errors
+
+| Situation | GIS response |
+| --- | --- |
+| `EMAIL_DUMP_API_BASE_URL` not set | `503` configuration error |
+| Upstream timeout | `504` gateway timeout |
+| Connection failure | `503` service unavailable |
+| Upstream `401` / `403` | `401` unauthorized |
+| Upstream `404` | `404` provider resource error |
+| Upstream `429` | `503` rate limited |
+| Upstream `5xx` | `503` service unavailable |
+| Malformed JSON, missing/invalid `data` | `503` invalid provider response |
+| Missing / invalid coordinates | skipped and counted, import continues |
+
+The upstream response body, provider credentials, bearer tokens, database connection strings, and internal tracebacks are never returned. Everything goes through the typed application exceptions in `utils/exceptions.py` and the shared exception handler.
+
+### Example
+
+Request:
+
+```http
+GET /cases/123/email-dump/origin-ips?risk_level=high&country=India
+Authorization: Bearer <token>
+```
+
+GIS then calls:
+
+```http
+GET http://192.168.6.63:8002/api/emails/single/origin-ips/123?risk_level=high&country=India
+Authorization: Bearer <token>
+```
+
+GIS response:
+
+```json
+{
+  "success": true,
+  "case_id": 123,
+  "module_slug": "email-dump",
+  "layers_created": 1,
+  "layers_reused": 2,
+  "features_created": 5,
+  "features_reused": 3,
+  "skipped_coordinates": 1,
+  "layers": [
+    {
+      "id": 25,
+      "case_id": 123,
+      "name": "Email 101",
+      "layer_type": "email",
+      "module_slug": "email-dump",
+      "visible": true
+    }
+  ]
+}
+```
+
+The raw Email Dump payload is never returned to the frontend.
 
 ## WebSockets
 

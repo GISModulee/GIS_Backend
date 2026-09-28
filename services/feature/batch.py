@@ -34,6 +34,7 @@ from utils.exceptions import (
     UnprocessableEntityError,
     ServiceUnavailableError,
 )
+from utils.constants import DEFAULT_MODULE_SLUG
 
 from services.layer.layer_service import create_untitled_layer, get_layer
 from services.feature.common import _feature_select, _row_to_feature_dict
@@ -56,12 +57,16 @@ def _run_completed_coroutine(coro):
 # in ONE transaction: one lock, one feature_number lookup, one
 # commit. Built for upload_service.py's KML/GeoJSON extractors.
 
-def create_features_batch(features: list, case_id: int, layer_id: int, db, created_by: int | None = None):
+def create_features_batch(features: list, case_id: int, layer_id: int, db, created_by: int | None = None, module_slug: str = DEFAULT_MODULE_SLUG):
     """
     features: list of dicts, each with keys:
         name, geometry (GeoJSON dict), geometry_type, properties
     Circles aren't supported in this batch path (uploads don't produce
     them) - only Polygon/LineString/Point geometries from parsed files.
+
+    module_slug is the origin slug applied to every feature in the
+    batch; a per-feature "module_slug" key overrides it when provided.
+    Defaults to the GIS origin slug.
 
     created_features example:
         {
@@ -123,6 +128,7 @@ def create_features_batch(features: list, case_id: int, layer_id: int, db, creat
                 "feature_number": next_number,
                 "layer_id": layer_id,
                 "case_id": case_id,
+                "module_slug": f.get("module_slug") or module_slug,
                 "name": f.get("name"),
                 "geom": geometry,
                 "geometry_type": f.get("geometry_type", "Polygon"),
@@ -150,6 +156,7 @@ def create_features_batch(features: list, case_id: int, layer_id: int, db, creat
                 Feature.feature_number,
                 Feature.case_id,
                 Feature.layer_id,
+                Feature.module_slug,
                 Feature.name,
                 Feature.geometry_type,
                 Feature.radius,

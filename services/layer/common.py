@@ -37,7 +37,7 @@ _AUTO_NAME_PREFIXES = {
 
 async def _dict(layer):
     return {key: getattr(layer, key) for key in (
-        "id", "case_id", "name", "layer_type", "visible", "created_at"
+        "id", "case_id", "name", "layer_type", "module_slug", "visible", "created_at"
     )}
 
 

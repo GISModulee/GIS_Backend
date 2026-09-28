@@ -69,7 +69,7 @@ async def create_feature(feature, db, created_by: int | None = None):
     layer_id = feature.layer_id or None
 
     if layer_id is None:
-        layer_id = await _create_auto_layer(case_id, db)
+        layer_id = await _create_auto_layer(case_id, db, module_slug=feature.module_slug)
 
     # ---------------------------------
     # 3. VALIDATE GEOMETRY INPUT BEFORE HITTING THE DB
@@ -153,6 +153,7 @@ async def create_feature(feature, db, created_by: int | None = None):
             feature_number=next_feature_number,
             layer_id=layer_id,
             case_id=case_id,
+            module_slug=feature.module_slug,
             name=feature.name,
             geom=geometry,
             geometry_type=geometry_type,
