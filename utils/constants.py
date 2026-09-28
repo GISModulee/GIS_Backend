@@ -213,6 +213,13 @@ GEO_SEARCH_GOVERNMENT_TIMEOUT = "Government search timed out"
 # is always built from settings.EMAIL_DUMP_API_BASE_URL so the provider
 # host is configurable and never hard-coded in service logic.
 EMAIL_DUMP_ORIGIN_IPS_PATH = "/api/emails/single/origin-ips"
+# Per-case dump listing. The case id is appended to this path, exactly as
+# with the origin-IP endpoint; target_id is a query parameter.
+EMAIL_DUMP_DUMPS_PATH = "/api/dumps/single"
+# The provider exposes a per-case target list. It is not a nested path of
+# the dumps endpoint: case_id is interpolated, so the prefix is a constant
+# and only the leaf is appended.
+EMAIL_DUMP_TARGETS_PREFIX_PATH = "/api/cases"
 
 # One layer per upstream email_id, named deterministically so repeat
 # imports reuse the same case-scoped layer instead of duplicating it.
@@ -268,3 +275,19 @@ EMAIL_DUMP_UNAUTHORIZED = "Email Dump service rejected the provided credentials.
 EMAIL_DUMP_NOT_FOUND = "No Email Dump origin-IP data was found for this case."
 EMAIL_DUMP_INVALID_RESPONSE = "Email Dump service returned an invalid response."
 EMAIL_DUMP_IMPORT_FAILED = "Failed to import Email Dump origin IPs"
+EMAIL_DUMP_TARGET_NOT_FOUND = (
+    "No Email Dump target was found for this case. Import the case's emails first."
+)
+EMAIL_DUMP_NO_DUMPS = "No Email Dump dumps were found for this target."
+EMAIL_DUMP_INVALID_DUMPS_RESPONSE = (
+    "Email Dump service returned an invalid response."
+)
+EMAIL_DUMP_DUMPS_FETCH_FAILED = (
+    "Failed to fetch Email Dump dumps. Please try again."
+)
+EMAIL_DUMP_INVALID_TARGETS_RESPONSE = (
+    "Email Dump service returned an invalid response."
+)
+EMAIL_DUMP_TARGETS_FETCH_FAILED = (
+    "Failed to fetch Email Dump targets. Please try again."
+)

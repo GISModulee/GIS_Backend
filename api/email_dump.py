@@ -3,9 +3,13 @@ from sqlalchemy.orm import Session
 
 from database.database import get_db
 from schemas.email_dump_schema import (
+    EmailDumpDumpsQuery,
+    EmailDumpListResponse,
     EmailDumpOriginIpImportResponse,
     EmailDumpOriginIpQuery,
+    EmailDumpTargetsResponse,
 )
+from services.email_dump.dumps import list_dumps, list_targets
 from services.email_dump.origin_ips import import_origin_ips
 from utils.constants import STATUS_OK
 from utils.dependencies import get_access_token, require_roles_for_case
@@ -78,3 +82,69 @@ async def get_email_dump_origin_ips(
         db,
         created_by=current_user["user_id"],
     )
+
+
+@router.get(
+    "/cases/{case_id}/email-dump/targets",
+    response_model=EmailDumpTargetsResponse,
+    status_code=STATUS_OK,
+    summary="List the Email Dump targets in a case",
+)
+async def get_email_dump_targets(
+    case_id: int,
+    db: Session = Depends(get_db),
+    access_token: str = Depends(get_access_token),
+    current_user=Depends(require_roles_for_case(CAN_WRITE)),
+) -> EmailDumpTargetsResponse:
+    """List the targets Email Dump knows about for a case.
+
+    This is what populates the target list. Each target already carries
+    its `dump_ids`, so a frontend can build a dump dropdown from this
+    response alone and only needs the dumps route when it needs a dump's
+    counters.
+    """
+    logger.info(
+        "GET /cases/%s/email-dump/targets | user_id=%s | role=%s",
+        case_id,
+        current_user["user_id"],
+        current_user["role"],
+    )
+
+    return await list_targets(case_id, access_token, db)
+
+
+# ===================================================
+# EMAIL DUMP DUMPS
+# ===================================================
+# Same proxy shape as the import above, but read-oriented: the frontend
+# calls it when the user picks a target, to fill the dump dropdown.
+#
+# The same CAN_WRITE gate applies. Targets are only ever shown for a case
+# the user can write to, since both this route and the import above are
+# gated the same way.
+
+@router.get(
+    "/cases/{case_id}/email-dump/dumps",
+    response_model=EmailDumpListResponse,
+    status_code=STATUS_OK,
+    summary="List the Email Dump dumps available for a target",
+)
+async def get_email_dump_dumps(
+    case_id: int,
+    target_id: str = Query(description="Email Dump target identifier"),
+    db: Session = Depends(get_db),
+    access_token: str = Depends(get_access_token),
+    current_user=Depends(require_roles_for_case(CAN_WRITE)),
+) -> EmailDumpListResponse:
+    """Fetch and cache the dumps belonging to one Email Dump target."""
+    query = EmailDumpDumpsQuery(target_id=target_id)
+
+    logger.info(
+        "GET /cases/%s/email-dump/dumps | user_id=%s | role=%s | target_id=%s",
+        case_id,
+        current_user["user_id"],
+        current_user["role"],
+        query.target_id,
+    )
+
+    return await list_dumps(case_id, query.target_id, access_token, db)

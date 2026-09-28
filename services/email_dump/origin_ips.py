@@ -5,12 +5,14 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-from models.model import Feature, Layer
+from models.model import EmailDump, EmailRecord, EmailTarget, Feature, Layer
 from schemas.email_dump_schema import (
     EmailDumpOriginIpImportResponse,
     EmailDumpOriginIpQuery,
     EmailDumpOriginIpResponse,
+    EmailDumpRef,
     EmailOriginIpRecord,
+    EmailTargetRef,
     OriginIpCount,
 )
 from services.feature.feature_websocket_manager import feature_connection_manager
@@ -157,6 +159,212 @@ async def fetch_origin_ips(
         sorted(params),
     )
     return parsed.data
+
+
+async def _upsert_email(
+    case_id: int,
+    record: EmailOriginIpRecord,
+    origin_ip: OriginIpCount,
+    layer_id: int | None,
+    db,
+) -> tuple[EmailRecord, bool]:
+    """Insert or update the `emails` row for one (email_id, ip) pair.
+
+    This is the normalised form of what used to be written only into
+    `features.properties`. (case_id, email_id, ip) is the primary key,
+    so a re-import updates the existing row instead of duplicating it.
+    Returns (row, created).
+    """
+    values = {
+        "email_address": origin_ip.email_address,
+        "ip_type": origin_ip.ip_type,
+        "count": origin_ip.count,
+        "risk_level": record.risk_level,
+        "is_suspicious": record.is_suspicious,
+        "country": origin_ip.country,
+        "isp": origin_ip.isp,
+        "first_seen": origin_ip.first_seen,
+        "last_seen": origin_ip.last_seen,
+    }
+
+    try:
+        row = db.scalar(
+            select(EmailRecord).where(
+                EmailRecord.case_id == case_id,
+                EmailRecord.email_id == record.email_id,
+                EmailRecord.ip == origin_ip.ip,
+            )
+        )
+        if row is None:
+            row = EmailRecord(
+                case_id=case_id,
+                email_id=record.email_id,
+                ip=origin_ip.ip,
+                layer_id=layer_id,
+                **values,
+            )
+            db.add(row)
+            db.flush()
+            return row, True
+
+        for field, value in values.items():
+            setattr(row, field, value)
+        row.layer_id = layer_id
+        db.flush()
+        return row, False
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Email Dump email upsert failed | case_id=%s | email_id=%s | ip=%s | error=%s",
+            case_id,
+            record.email_id,
+            origin_ip.ip,
+            exc,
+            exc_info=True,
+        )
+        raise ServiceUnavailableError(EMAIL_DUMP_IMPORT_FAILED) from exc
+
+
+async def _upsert_target(
+    case_id: int,
+    email_id: int,
+    target: EmailTargetRef,
+    db,
+) -> tuple[EmailTarget, bool]:
+    """Insert or update one `email_targets` row for an email.
+
+    Keyed on (case_id, target_id), the provider's own identifiers, with
+    `email_id` recording which email reported it.
+
+    The same row is also written by the case-targets listing, which
+    leaves `email_id` null. An import is the more specific source, so it
+    fills the blank in rather than skipping a target it has just seen
+    attributed to it.
+    """
+    try:
+        row = db.scalar(
+            select(EmailTarget).where(
+                EmailTarget.case_id == case_id,
+                EmailTarget.target_id == str(target.target_id),
+            )
+        )
+        if row is None:
+            row = EmailTarget(
+                case_id=case_id,
+                target_id=str(target.target_id),
+                email_id=email_id,
+                target_name=target.target_name,
+            )
+            db.add(row)
+            db.flush()
+            return row, True
+
+        row.email_id = email_id
+        # A payload that carries no name must not blank one the listing
+        # stored. Both sources are partial about this field, so a missing
+        # value is an absence rather than a change.
+        if target.target_name is not None:
+            row.target_name = target.target_name
+        db.flush()
+        return row, False
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Email Dump target upsert failed | case_id=%s | target_id=%s | error=%s",
+            case_id,
+            target.target_id,
+            exc,
+            exc_info=True,
+        )
+        raise ServiceUnavailableError(EMAIL_DUMP_IMPORT_FAILED) from exc
+
+
+async def _upsert_dump(
+    case_id: int,
+    target_id: str,
+    dump: EmailDumpRef,
+    db,
+) -> tuple[EmailDump, bool]:
+    """Insert or update one `email_dumps` row for a target.
+
+    Keyed on (case_id, dump_id), the provider's own identifiers.
+    """
+    try:
+        row = db.scalar(
+            select(EmailDump).where(
+                EmailDump.case_id == case_id,
+                EmailDump.dump_id == str(dump.dump_id),
+            )
+        )
+        if row is None:
+            row = EmailDump(
+                case_id=case_id,
+                dump_id=str(dump.dump_id),
+                target_id=str(target_id),
+                name=dump.name,
+            )
+            db.add(row)
+            db.flush()
+            return row, True
+
+        # A dump is keyed by itself, so its target can change: the
+        # provider may report the same dump under another target.
+        row.target_id = str(target_id)
+        # As with a target's name, a payload with no dump name must not
+        # blank the one already stored.
+        if dump.name is not None:
+            row.name = dump.name
+        db.flush()
+        return row, False
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Email Dump dump upsert failed | case_id=%s | dump_id=%s | error=%s",
+            case_id,
+            dump.dump_id,
+            exc,
+            exc_info=True,
+        )
+        raise ServiceUnavailableError(EMAIL_DUMP_IMPORT_FAILED) from exc
+
+
+async def _persist_email_records(
+    case_id: int,
+    record: EmailOriginIpRecord,
+    layer_id: int,
+    db,
+) -> dict[str, int]:
+    """Write the `emails` / `email_targets` / `email_dumps` rows.
+
+    Only `emails` carries a `layer_id`: it is the one table with a row per
+    point feature, so it is the one that belongs to a layer. Targets and
+    dumps hold no geometry, and their layer is reached through the email
+    that reported the target.
+
+    A target belongs to an email rather than to one of its IP
+    observations, and `email_targets` is keyed by the provider's own
+    identifiers, so a target is written once however many IPs the email
+    has: the IP rows do not duplicate it.
+    """
+    counts = {
+        "emails_created": 0,
+        "emails_updated": 0,
+        "targets_created": 0,
+        "targets_updated": 0,
+        "dumps_created": 0,
+        "dumps_updated": 0,
+    }
+
+    for origin_ip in record.ips:
+        _, created = await _upsert_email(case_id, record, origin_ip, layer_id, db)
+        counts["emails_created" if created else "emails_updated"] += 1
+
+    for target in record.targets:
+        target_id = str(target.target_id)
+        _, created = await _upsert_target(case_id, record.email_id, target, db)
+        counts["targets_created" if created else "targets_updated"] += 1
+        for dump in target.dumps:
+            _, dump_created = await _upsert_dump(case_id, target_id, dump, db)
+            counts["dumps_created" if dump_created else "dumps_updated"] += 1
+
+    return counts
 
 
 def _is_valid_latitude(latitude: float | None) -> bool:
@@ -335,10 +543,29 @@ async def import_origin_ips(
     features_reused = 0
     skipped_coordinates = 0
 
+    counts = {
+        "emails_created": 0,
+        "emails_updated": 0,
+        "targets_created": 0,
+        "targets_updated": 0,
+        "dumps_created": 0,
+        "dumps_updated": 0,
+    }
+
     for record in records:
+        # The layer is resolved first because the normalised rows record
+        # its id. The features below still carry the same data in their
+        # properties, so nothing is lost while callers migrate to reading
+        # the tables.
         layer, layer_created = await _get_or_create_email_layer(
             case_id, record.email_id, db
         )
+        layer_id = layer["id"]
+
+        record_counts = await _persist_email_records(case_id, record, layer_id, db)
+        for key, value in record_counts.items():
+            counts[key] += value
+
         layers.append(layer)
         if layer_created:
             layers_created += 1
@@ -388,13 +615,21 @@ async def import_origin_ips(
     logger.info(
         "Email Dump origin IPs imported | case_id=%s | layers_created=%s | "
         "layers_reused=%s | features_created=%s | features_reused=%s | "
-        "skipped_coordinates=%s",
+        "skipped_coordinates=%s | emails_created=%s | emails_updated=%s | "
+        "targets_created=%s | targets_updated=%s | dumps_created=%s | "
+        "dumps_updated=%s",
         case_id,
         layers_created,
         layers_reused,
         features_created,
         features_reused,
         skipped_coordinates,
+        counts["emails_created"],
+        counts["emails_updated"],
+        counts["targets_created"],
+        counts["targets_updated"],
+        counts["dumps_created"],
+        counts["dumps_updated"],
     )
 
     return EmailDumpOriginIpImportResponse(
@@ -406,4 +641,5 @@ async def import_origin_ips(
         features_reused=features_reused,
         skipped_coordinates=skipped_coordinates,
         layers=layers,
+        **counts,
     )

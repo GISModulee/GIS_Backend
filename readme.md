@@ -160,6 +160,10 @@ The main database stores:
 - comments and replies
 - image records
 - geo-news search history
+- Email Dump records: `emails`, `email_targets`, `email_dumps`
+
+The `email-dump` module writes a `layers` row per imported email, so every
+imported email is visible in the layers list alongside its point features.
 
 The MapServer database is read separately for hotspot reference data, mainly from:
 
@@ -509,14 +513,41 @@ Every valid IP coordinate becomes one Point feature in that email's layer:
 
 Every layer and feature created by this integration uses `module_slug = "email-dump"`, validated against the centralized whitelist in `utils/constants.py` (`gis` / `email-dump` / `telecom-analysis`). The response never contains a null `module_slug`.
 
+### Stored tables
+
+The same import also writes the payload to three normalised tables, so it can be queried in SQL instead of extracted from `features.properties` JSON.
+
+| Table | One row per | Primary key |
+| --- | --- | --- |
+| `emails` | email and IP observation | `(case_id, email_id, ip)` |
+| `email_targets` | target reported for an email | `(case_id, target_id)` |
+| `email_dumps` | dump belonging to a target | `(case_id, dump_id)` |
+
+`emails` is the normalised form of the `email-dump` feature properties: `email_id`, `email_address`, `ip`, `ip_type`, `count`, `risk_level`, `is_suspicious`, `country`, `isp`, `first_seen`, `last_seen`. One row per (email, IP) pair keeps it 1:1 with the IP features, and the IP stays in the key because it is the grain of the data: a re-import of the same email and IP updates that row, while the same IP belonging to a *different* email is a separate row.
+
+The keys are the provider's own identifiers, so there is no backend-assigned `id` to keep in step with the payload. `email_dumps.target_id` is now the provider's target identifier, and a real composite foreign key `(case_id, target_id) -> email_targets(case_id, target_id)` replaces the old link to a local surrogate, so deleting a target still takes its dumps with it.
+
+One link is necessarily weaker than before. `email_targets.email_id` was a foreign key to `emails.id`; it is now a plain indexed column holding the provider's `email_id`, because an email has one row per IP and so no single `emails` row for a target to point at. Deleting an email therefore no longer cascades to its targets — both are re-derivable from the provider on the next import.
+
+All three tables also carry `layer_id`, a **required** foreign key to `layers.id` `ON DELETE CASCADE`, so a normalised row can always be traced back to the layer whose features it describes. Every imported email is a layer: the import creates one `Email {email_id}` layer per email, so the email shows up in the ordinary layers list and not only in SQL, and the rows written alongside it point at that layer. `layer_id` is `NOT NULL`, so the database rejects a row that names no layer; deleting a layer removes its rows with it.
+
+Migration `20260928_05` enforces that. Rows left with a null `layer_id`, or naming a layer that no longer exists, are deleted rather than kept as dangling references — the foreign key cascade already prevents the second case, and such rows describe no layer, no features and no provider target, so the import recreates them from the provider on the next run. The count deleted per table is logged rather than dropped silently.
+
+`case_id` on all three tables is **not** a foreign key. GIS owns no `cases` table: cases and users belong to Central Intelligence (migration `20260904_01` removed the local case and user FKs deliberately). `case_id` is a plain indexed integer, matching `layers.case_id` and `features.case_id`.
+
+Provider `target_id` and `dump_id` are stored as text, so GIS does not assume the Email Dump Backend's identifier type. The provider is not consistent about sending them — the case-targets endpoint documents `target_id` as an integer while the per-case dumps endpoint leaves it untyped — so integer identifiers are coerced to their digit form on the way in rather than rejected. `targets` is optional in the upstream response, so the import works unchanged against the current payload and starts populating targets and dumps once the provider sends them.
+
 ### Duplicate behavior
 
 The import is idempotent and case-scoped:
 
 - **Layer reuse** — match on `case_id` + layer name + `module_slug`.
 - **Feature reuse** — match on `layer_id` + `email_id` in `properties` + `ip` in `properties`.
+- **Email row reuse** — match on the key `(case_id, email_id, ip)`.
+- **Target row reuse** — match on the key `(case_id, target_id)`.
+- **Dump row reuse** — match on the key `(case_id, dump_id)`.
 
-A repeated import of the same data creates no duplicates; it only increments `layers_reused` / `features_reused`.
+A repeated import of the same data creates no duplicates; it increments `layers_reused` / `features_reused` and reports the normalised writes as `emails_updated`, `targets_updated`, and `dumps_updated` rather than `*_created`.
 
 ### WebSocket events
 
@@ -566,6 +597,12 @@ GIS response:
   "features_created": 5,
   "features_reused": 3,
   "skipped_coordinates": 1,
+  "emails_created": 2,
+  "emails_updated": 0,
+  "targets_created": 1,
+  "targets_updated": 0,
+  "dumps_created": 2,
+  "dumps_updated": 0,
   "layers": [
     {
       "id": 25,
