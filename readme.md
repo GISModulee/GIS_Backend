@@ -1,35 +1,34 @@
 # GIS Backend
 
-FastAPI backend for a PostgreSQL/PostGIS based geospatial case management platform. The service manages cases, layers, map features, comments, file imports, GeoCLIP image predictions, vector operations, geo-news search, and hotspot discovery from a separate MapServer/PostGIS database.
+FastAPI backend for a PostgreSQL/PostGIS case-management platform. It manages cases, layers, map features, comments, file imports, GeoCLIP image predictions, vector operations, geo-news search, live satellite and aircraft positions, hotspot discovery from a separate MapServer/PostGIS database, and the Email Dump integration.
 
 ## Tech Stack
 
-- FastAPI
+- FastAPI, Uvicorn
 - PostgreSQL + PostGIS
 - SQLAlchemy / GeoAlchemy2
 - Alembic migrations
 - Pydantic schemas
-- Uvicorn
 - WebSockets for live layer, feature, cursor, and comment updates
 
 ## Project Structure
 
 ```text
 api/                 FastAPI route modules
+config/              Runtime configuration, including hotspot categories
 database/            Main DB and MapServer DB connection setup
+migrations/          Alembic migration files
 models/              SQLAlchemy models
 schemas/             Pydantic request/response schemas
 services/            Business logic grouped by feature area
 utils/               Config, auth, roles, exceptions, logging
-migrations/          Alembic migration files
 uploads/             Uploaded GIS files
 logs/                Application logs
-config/              Runtime configuration files, including hotspot categories
 ```
 
 ## Environment
 
-Copy `.env.example` to `.env` in the project root and adjust the values. `.env.example` lists every supported setting, including the optional ones.
+Copy `.env.example` to `.env` and adjust the values. `.env.example` lists every supported setting.
 
 ```env
 DATABASE_URL=postgresql://postgres:password@localhost:5432/geobackend
@@ -43,23 +42,28 @@ LOG_BACKUP_COUNT=5
 
 GEOCLIP_TOP_K=5
 MAX_FILE_SIZE_MB=20
-
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 
 SECRET_KEY=change_this_secret
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=120
-
 CI_BASE_URL=http://192.168.6.63:8014
 MODULE_SLUG=spatial-geographical-analysis
 
 EMAIL_DUMP_API_BASE_URL=http://192.168.6.63:8002
 EMAIL_DUMP_TIMEOUT_SECONDS=30
+
+OPENSKY_BASE_URL=https://opensky-network.org/api
+OPENSKY_TIMEOUT_SECONDS=15
+AIRCRAFT_CACHE_TTL_SECONDS=30
+CELESTRAK_TLE_URL=https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=tle
+CELESTRAK_TIMEOUT_SECONDS=15
+SATELLITE_TLE_CACHE_TTL_SECONDS=3600
+SATELLITE_POSITION_CACHE_TTL_SECONDS=5
+SATELLITE_MAX_RESULTS=500
 ```
 
-`DATABASE_URL` is the main application database. `MAPSERVER_DATABASE_URL` is optional for the app in general, but required for hotspot search.
-
-`EMAIL_DUMP_API_BASE_URL` points at the external Email Dump Backend. It is optional: when it is empty the application still starts, and only the Email Dump route reports a configuration error. `EMAIL_DUMP_TIMEOUT_SECONDS` bounds the upstream request.
+`DATABASE_URL` is the main application database. `MAPSERVER_DATABASE_URL` is optional for the app in general but required for hotspot search. `EMAIL_DUMP_API_BASE_URL` is also optional: when empty the application still starts, and only the Email Dump routes report a configuration error.
 
 ## Setup
 
@@ -79,131 +83,75 @@ pip install -r requirements.txt
 
 ### MIME detection (libmagic)
 
-File/attachment upload validation detects the real content type with `python-magic`, a wrapper around the native libmagic C library. MIME detection is not optional — it protects against rename attacks (e.g. an `.exe` renamed to `report.pdf` is rejected).
+Upload validation detects the real content type with `python-magic`, a wrapper around the native libmagic C library. It is not optional — it rejects rename attacks such as an `.exe` renamed to `report.pdf`. `requirements.txt` picks the right provider per platform: `python-magic-bin` on Windows, which bundles the DLL, and `python-magic` on Linux/WSL, which needs the system library:
 
-The correct libmagic provider is selected automatically per platform by `requirements.txt`:
-
-- **Windows** — `pip install -r requirements.txt` installs `python-magic-bin`, which bundles the required Windows libmagic DLL. No extra step.
-- **Linux/WSL** — `python-magic` wraps the system libmagic library, so first install it with:
-
-  ```bash
-  sudo apt-get install libmagic1
-  ```
-
-  (On some distributions/older packages the development package `libmagic-dev` may be required instead.) `pip install -r requirements.txt` does **not** install the Linux system library itself.
+```bash
+sudo apt-get install libmagic1
+```
 
 ## Module Slugs
 
-`module_slug` is metadata identifying which source module created a layer or feature. It is **not** the CI authentication module (`settings.MODULE_SLUG` from `.env`, used when talking to Central Intelligence).
+`module_slug` is metadata identifying which source module created a layer or feature. It is **not** the CI authentication module (`settings.MODULE_SLUG`, used when talking to Central Intelligence).
 
-Supported slugs:
+| Slug | Origin |
+| --- | --- |
+| `gis` | Core GIS operations: manual layers, imports, measurements, GeoCLIP, hotspots, vector operations |
+| `email-dump` | Email intelligence integrations |
+| `telecom-analysis` | Telecom / phone-number analysis integrations |
 
-| Slug                | Origin                                          |
-| ------------------- | ----------------------------------------------- |
-| `gis`               | Core GIS operations (manual layers, imports, measurements, GeoCLIP, hotspots, vector operations) |
-| `email-dump`        | Email intelligence integrations                 |
-| `telecom-analysis`  | Telecom / phone-number analysis integrations     |
-
-Rules:
-
-- Manual layer creation must send a valid `module_slug`; `null`, empty, whitespace-only, or unknown values are rejected (`gis / email-dump / telecom-analysis` only).
+- Manual layer creation must send a valid `module_slug`; `null`, empty, whitespace-only, or unknown values are rejected.
 - Automatically created layers inherit the `module_slug` of the feature being created when no `layer_id` is supplied. Ordinary GIS-created features use `gis`.
-- Feature `module_slug` defaults to `gis` and supports the same whitelist. The feature/layer DB columns are NOT NULL, indexed, and constrained by CHECK constraints matching the application whitelist.
-- Removing the columns is handled by the migration's downgrade; applying `alembic upgrade head` backfills any pre-existing rows to `gis` before enforcing NOT NULL.
+- The `features` and `layers` DB columns are NOT NULL, indexed, and constrained by CHECK constraints matching the application whitelist. `alembic upgrade head` backfills any pre-existing rows to `gis` before enforcing NOT NULL.
 
-## Email and Phone Properties
-
-Email and phone values are independent and live inside the existing feature `properties` JSON — they may be present separately or together. `module_slug` identifies the originating module, not the presence of an email or phone number.
+Email and phone values live inside the existing feature `properties` JSON and are independent of `module_slug`:
 
 ```json
 {
   "module_slug": "email-dump",
-  "properties": {
-    "email": "person@example.com"
-  }
+  "properties": { "email": "person@example.com" }
 }
 ```
 
 ```json
 {
   "module_slug": "telecom-analysis",
-  "properties": {
-    "phone_number": "+919876543210"
-  }
-}
-```
-
-```json
-{
-  "module_slug": "telecom-analysis",
-  "properties": {
-    "email": "person@example.com",
-    "phone_number": "+919876543210"
-  }
+  "properties": { "phone_number": "+919876543210" }
 }
 ```
 
 ## Database
 
-Apply migrations:
-
 ```bash
 alembic upgrade head
 ```
 
-The main database stores:
+The main database stores users, cases, layers, features, comments and replies, image records, geo-news search history, and the Email Dump tables (`emails`, `email_targets`, `email_target_emails`, `email_dumps`).
 
-- users
-- cases
-- layers
-- features
-- comments and replies
-- image records
-- geo-news search history
-- Email Dump records: `emails`, `email_targets`, `email_dumps`
-
-The `email-dump` module writes a `layers` row per imported email, so every
-imported email is visible in the layers list alongside its point features.
-
-The MapServer database is read separately for hotspot reference data, mainly from:
-
-- `public.planet_osm_point`
-- `public.planet_osm_polygon`
+The MapServer database is read separately for hotspot reference data, mainly `public.planet_osm_point` and `public.planet_osm_polygon`.
 
 ## Run
-
-Development:
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-If WSL/file watching runs out of memory, run without reload:
+If WSL file watching runs out of memory, run without reload:
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-Health check:
-
-```text
-GET /health
-```
+| | |
+| --- | --- |
+| API docs | http://localhost:8000/docs |
+| Health check | `GET /health` |
 
 ## Authentication
 
-Routes:
-
 ```text
 POST /register
-POST /login
-GET  /me
+POST  /login
+GET   /me
 ```
 
 Protected APIs require a bearer token:
@@ -216,66 +164,39 @@ Role groups are defined in `utils/roles.py`.
 
 ## Core APIs
 
-### Cases
+### Cases, Layers, Features
 
-```text
-POST   /cases
-GET    /cases
-GET    /cases/{case_id}
-PUT    /cases/{case_id}
-PATCH  /cases/{case_id}
-DELETE /cases/{case_id}
-```
+| Method | Path |
+| --- | --- |
+| `POST` `GET` | `/cases` |
+| `GET` `PUT` `PATCH` `DELETE` | `/cases/{case_id}` |
+| `POST` `GET` | `/layers` |
+| `POST` `GET` | `/layers/case/{case_id}` |
+| `GET` `PUT` `PATCH` `DELETE` | `/layers/case/{case_id}/{layer_id}` |
+| `POST` `GET` | `/features` |
+| `POST` | `/cases/{case_id}/layers/{layer_id}/features/measurement` |
+| `GET` | `/cases/{case_id}/features` |
+| `GET` | `/cases/{case_id}/layers/{layer_id}/features` |
+| `GET` | `/cases/{case_id}/layers/{layer_id}/features/{feature_number}` |
+| `PUT` `PATCH` `DELETE` | `/cases/{case_id}/layers/{layer_id}/features/{feature_id}` |
 
-### Layers
-
-```text
-POST   /layers
-POST   /layers/case/{case_id}
-GET    /layers
-GET    /layers/case/{case_id}
-GET    /layers/case/{case_id}/{layer_id}
-PUT    /layers/case/{case_id}/{layer_id}
-PATCH  /layers/case/{case_id}/{layer_id}
-DELETE /layers/case/{case_id}/{layer_id}
-```
+Features are stored in SRID 4326. Geometry is written through PostGIS functions and returned as GeoJSON.
 
 Manual layer creation requires the origin `module_slug` in the request body:
 
 ```json
-{
-  "name": "Email Locations",
-  "layer_type": "email",
-  "module_slug": "email-dump",
-  "visible": true
-}
+{ "name": "Email Locations", "layer_type": "email", "module_slug": "email-dump", "visible": true }
 ```
 
-`POST /layers/case/{case_id}` takes `case_id` as a path parameter (not the body), validates the bearer token, the user's access to the case, and the layer write role, and broadcasts the `layer.created` WebSocket event. `POST /layers` also requires `module_slug`.
-
-### Features
-
-```text
-POST   /features
-POST   /cases/{case_id}/layers/{layer_id}/features/measurement
-GET    /features
-GET    /cases/{case_id}/features
-GET    /cases/{case_id}/layers/{layer_id}/features
-GET    /cases/{case_id}/layers/{layer_id}/features/{feature_number}
-PUT    /cases/{case_id}/layers/{layer_id}/features/{feature_id}
-PATCH  /cases/{case_id}/layers/{layer_id}/features/{feature_id}
-DELETE /cases/{case_id}/layers/{layer_id}/features/{feature_id}
-```
-
-Features are stored in SRID 4326. Geometry is written through PostGIS functions and returned as GeoJSON.
+`POST /layers/case/{case_id}` takes `case_id` as a path parameter rather than in the body, validates the bearer token, case access, and the layer write role, then broadcasts `layer.created`. `POST /layers` also requires `module_slug`.
 
 ### Satellites
 
 ```text
-GET    /api/satellites
+GET /api/satellites
 ```
 
-Token-protected live satellite positions, read from CelesTrak and propagated with SGP4. Returns a GeoJSON `FeatureCollection`; each feature is a `Point` whose properties are the satellite name, NORAD ID, altitude in km, and the propagation timestamp.
+Token-protected live satellite positions, read from CelesTrak and propagated with SGP4. Returns a GeoJSON `FeatureCollection` whose features are `Point`s with the satellite name, NORAD ID, altitude in km, and the propagation timestamp.
 
 | Parameter | Default | Description |
 | --- | --- | --- |
@@ -283,9 +204,7 @@ Token-protected live satellite positions, read from CelesTrak and propagated wit
 | `limit` | 500 | Maximum features returned, capped by `SATELLITE_MAX_RESULTS`. |
 | `group` | `active` | CelesTrak element group. An unknown value returns 422. |
 
-Supported `group` values:
-
-| Value | Contents |
+| `group` | Contents |
 | --- | --- |
 | `active` | Everything in the current active catalog. The default. |
 | `stations` | Crewed space stations and visiting vehicles. |
@@ -294,114 +213,38 @@ Supported `group` values:
 | `gps-ops` | The GPS operational constellation. |
 | `starlink` | The Starlink constellation. |
 
-Omitting `group` keeps the previous behaviour and returns the full active catalog, so existing clients are unaffected.
-
 ```http
 GET /api/satellites?group=stations&bbox=70,15,80,20&limit=100
 ```
 
-Feeds are cached per group: TLE data for an hour, propagated positions for five seconds, so a client cycling through groups does not multiply upstream requests. CelesTrak regenerates its data on a two-hour cadence and answers requests made inside that window with `403` and a "no new data" body. That is treated as a successful no-op and the last good TLE set is reused, so a cooldown never surfaces as an error. It only returns 503 if the feed is unavailable and nothing has been cached yet.
+Feeds are cached per group — TLE data for an hour, propagated positions for five seconds — so a client cycling through groups does not multiply upstream requests. CelesTrak regenerates on a two-hour cadence and answers requests inside that window with `403` and a "no new data" body; that is treated as a successful no-op and the last good TLE set is reused, so a cooldown never surfaces as an error. It returns 503 only if the feed is unavailable and nothing has been cached yet. The feed URL is `settings.CELESTRAK_TLE_URL` plus a `GROUP` query parameter — the legacy static `pub/TLE/catalog.txt` file is no longer served and answers `403`. `starlink` contains several thousand objects while the propagation input is capped at `SATELLITE_MAX_RESULTS`, and the cap is applied before propagation, so a large group returns the first 500 records in feed order.
 
-The feed URL is `settings.CELESTRAK_TLE_URL` plus a `GROUP` query parameter. The legacy static `pub/TLE/catalog.txt` file is no longer served by CelesTrak and answers `403`; the default is the query-string endpoint.
+`GET /api/aircraft` is the sibling live-data endpoint, following the same GeoJSON and caching conventions with a `bbox` filter instead of `group`.
 
-Note that `starlink` contains several thousand objects while the propagation input is capped at `SATELLITE_MAX_RESULTS` (500). The cap is applied before propagation, so a large group returns the first 500 records in feed order rather than the whole constellation.
+### File Import, GeoCLIP, Comments, Vector, News, Hotspots
 
-`GET /api/aircraft` is the sibling live-data endpoint and follows the same GeoJSON and caching conventions, with a `bbox` filter instead of `group`.
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/import` | Extracts GIS files, stores geometries as features, broadcasts batch events |
+| `POST` | `/upload` | GeoCLIP prediction images, saved as circular features with the metadata in `properties` |
+| `GET` | `/layers/{layer_id}/images` | Also `/geoclip/layers/{layer_id}/features` |
+| `GET` | `/image/{image_id}` | |
+| `DELETE` | `/geoclip/layers/{layer_id}` | |
+| `POST` | `/cases/{case_id}/layers/{layer_id}/comments` | Attachments, delete, and flat reply threads via `root_comment_id` |
+| `POST` | `/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/reply` | |
+| `GET` | `…/features/{feature_number}/comments` | Also `…/comments/thread` |
+| `GET` | `…/comments/{comment_id}/replies` | Also `…/comments/{comment_id}/attachment` |
+| `DELETE` | `…/comments/{comment_id}` | |
+| `GET` | `/cases/{case_id}/comments` | Also `/cases/{case_id}/layers/{layer_id}/comments` |
+| `POST` | `/vector/union` `/intersection` `/difference` `/symdifference` `/buffer` `/centroid` `/convex-hull` | |
+| `POST` | `/geo-search/news` | Uses the selected feature geometry as the search area |
+| `GET` `DELETE` | `/geo-search/news/history` | Lightweight search history metadata |
+| `POST` | `/geo-search/news/comment` | Saves selected news as feature comments |
+| `POST` | `/hotspots/search` `/hotspots/save` | Searches MapServer/PostGIS for OSM places matching the selected geometry |
 
-## File Import
+Vector results are saved back into the project as new features/layers and broadcast through the existing layer and feature WebSocket managers. Intersection uses `ST_Intersects` before computing `ST_Intersection` so non-overlapping selections are rejected instead of saving empty geometries.
 
-```text
-POST /import
-```
-
-The import pipeline supports GIS file extraction and stores parsed geometries as features under a layer. Bulk import broadcasts feature batch events over the existing feature WebSocket.
-
-## GeoCLIP
-
-```text
-POST   /upload
-GET    /layers/{layer_id}/images
-GET    /geoclip/layers/{layer_id}/features
-GET    /image/{image_id}
-DELETE /geoclip/layers/{layer_id}
-```
-
-GeoCLIP image predictions are saved as circular prediction features. Each prediction creates a feature with circle geometry and prediction metadata in `properties`.
-
-## Comments
-
-```text
-POST   /cases/{case_id}/layers/{layer_id}/comments
-POST   /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/reply
-GET    /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments
-GET    /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/thread
-GET    /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}/replies
-GET    /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}/attachment
-GET    /cases/{case_id}/comments
-GET    /cases/{case_id}/layers/{layer_id}/comments
-DELETE /cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments/{comment_id}
-```
-
-Comments support attachments, delete, and flat reply threads through `root_comment_id`.
-
-## Vector Operations
-
-```text
-POST /vector/union
-POST /vector/intersection
-POST /vector/difference
-POST /vector/symdifference
-POST /vector/buffer
-POST /vector/centroid
-POST /vector/convex-hull
-```
-
-Vector results are saved back into the project as new features/layers and broadcast using the existing layer and feature WebSocket managers.
-
-Intersection uses `ST_Intersects` before computing `ST_Intersection` so non-overlapping selected shapes are rejected instead of saving empty geometries.
-
-## Geo News Search
-
-```text
-POST   /geo-search/news
-GET    /geo-search/news/history
-DELETE /geo-search/news/history
-POST   /geo-search/news/comment
-```
-
-News search uses the selected feature geometry as the search area, fetches relevant current news, stores lightweight search history metadata, and can save selected news as feature comments.
-
-## Hotspots
-
-```text
-POST /hotspots/search
-POST /hotspots/save
-```
-
-Hotspot search uses the selected project feature geometry from the main database, then searches the MapServer/PostGIS database for matching OSM places.
-
-Current MapServer sources:
-
-```text
-planet_osm_point
-planet_osm_polygon
-```
-
-Default behavior:
-
-- `range_meters = null`: search inside/intersecting the selected feature geometry
-- `range_meters` set: search within that distance from the selected feature center
-- `limit` default: `100`
-- `limit` max: `1000`
-- `range_meters` max: `50000`
-
-Hotspot response includes individual hotspot priority and risk zones. Saved hotspots are stored as normal project features and broadcast over the existing feature WebSocket as `feature.created`.
-
-Hotspot priority rules are configured in:
-
-```text
-config/hotspot_categories.json
-```
+Hotspot `range_meters` defaults to `null`, which searches inside/intersecting the selected geometry; set it to search within that distance of the feature's center, up to 50000. `limit` defaults to 100, capped at 1000. The response includes individual hotspot priority and risk zones; saved hotspots become normal project features and broadcast as `feature.created`. Priority rules live in `config/hotspot_categories.json`.
 
 ## Email Dump Origin IPs
 
@@ -409,49 +252,42 @@ config/hotspot_categories.json
 Frontend  →  GIS Backend  →  Email Dump Backend
 ```
 
-The GIS backend is the integration/proxy layer. It does **not** replace or duplicate the Email Dump backend: email analysis, email records, email IDs, risk analysis, origin-IP analysis, and Email Dump authentication all stay in the Email Dump backend. The frontend never calls the Email Dump backend directly — it calls the GIS route, which forwards the request upstream and converts the answer into GIS layers and features.
+The GIS backend is the integration layer. It does not replace or duplicate the Email Dump backend: email analysis, email records, email IDs, risk analysis, origin-IP analysis, and Email Dump authentication all stay upstream. The frontend never calls the Email Dump backend directly — it calls the GIS route, which forwards the request and converts the answer into GIS layers and features.
 
 ### Routes
 
 ```text
-GIS route (used by the frontend):
-GET /cases/{case_id}/email-dump/origin-ips
+GET /cases/{case_id}/email-dump/origin-ips    import emails, targets and dumps
+GET /cases/{case_id}/email-dump/targets       list targets, storing every one
+GET /cases/{case_id}/email-dump/dumps?target_id={tid1},{tid2}   list and cache dumps
+```
 
-External Email Dump endpoint (called by GIS only):
+Upstream endpoints, called by GIS only:
+
+```text
 GET {EMAIL_DUMP_API_BASE_URL}/api/emails/single/origin-ips/{case_id}
+GET {EMAIL_DUMP_API_BASE_URL}/api/cases/{case_id}/email-dump/targets
+GET {EMAIL_DUMP_API_BASE_URL}/api/dumps/single/{case_id}?target_id={tid}
 ```
 
-The provider URL is always built from `settings.EMAIL_DUMP_API_BASE_URL`; the host and port are never hard-coded in service logic. Only the path segment is fixed.
+The provider URL is always built from `settings.EMAIL_DUMP_API_BASE_URL`; the host and port are never hard-coded in service logic.
 
-### Configuration
-
-```env
-EMAIL_DUMP_API_BASE_URL=http://192.168.6.63:8002
-EMAIL_DUMP_TIMEOUT_SECONDS=30
-```
-
-`EMAIL_DUMP_API_BASE_URL` defaults to `""`. The application starts without it; calling the Email Dump route then returns a clear configuration error.
+Both listing routes write. `targets` upserts every target the provider returns, and `dumps` upserts the dumps of each selected target, so a target the user only picked from the dropdown is stored and its dumps become available before the email behind it has ever been imported. Both are keyed on the provider's own identifiers, so re-listing a case updates the rows it already has.
 
 ### Authentication
 
-The route uses the standard GIS authentication: the bearer token is validated by Central Intelligence, case access is validated, and the write role is required because the import creates layers and features.
+The route uses standard GIS authentication, and forwards the caller's own token so Email Dump applies its own authorization:
 
 ```python
 access_token = Depends(get_access_token)
-current_user  = Depends(require_roles_for_case(CAN_WRITE))
+current_user = Depends(require_roles_for_case(CAN_WRITE))
 ```
 
-The caller's token is forwarded upstream so Email Dump applies its own authorization:
-
-```http
-Authorization: Bearer <current-token>
-```
-
-GIS never mints, stores, or logs provider credentials.
+The write role is required because the import creates layers and features. GIS never mints, stores, or logs provider credentials.
 
 ### Query parameters
 
-The route accepts every parameter documented by the Email Dump Backend and forwards only the ones that were provided:
+The route accepts every parameter documented by the Email Dump Backend and forwards only those that were provided:
 
 ```text
 view_type  target_id  dump_id  ip_type  limit  keyword  isp  country  risk_level  is_suspicious
@@ -459,27 +295,11 @@ view_type  target_id  dump_id  ip_type  limit  keyword  isp  country  risk_level
 
 ### email_id → layer
 
-Every item in the upstream `data` array maps to one GIS layer, named deterministically:
-
-```text
-layer_name = f"Email {email_id}"
-```
-
-```json
-{
-  "case_id": 123,
-  "name": "Email 101",
-  "layer_type": "email",
-  "module_slug": "email-dump",
-  "visible": true
-}
-```
-
-Before creating anything, GIS looks for an existing layer matching `case_id` + `name` + `module_slug` and reuses it (`layers_reused`) instead of creating a duplicate (`layers_created`). Layers are case-scoped: the same `email_id` in a different case gets its own layer.
+Every item in the upstream `data` array maps to one GIS layer, named `f"Email {email_id}"`. Before creating anything, GIS looks for an existing layer matching `case_id` + `name` + `module_slug` and reuses it (`layers_reused`) rather than creating a duplicate. Layers are case-scoped, so the same `email_id` in a different case gets its own layer.
 
 ### IP → feature
 
-Every valid IP coordinate becomes one Point feature in that email's layer:
+Every valid IP coordinate becomes one Point feature in that email's layer. The provider reports the same IP more than once for a single email, once per role it played, and each of those is a genuinely different observation with its own count, timestamps, and geolocation. All persist as separate `emails` rows, while the **map** stays at one point per IP: two pins on one address is noise, and a dropped point understates the evidence.
 
 ```json
 {
@@ -490,8 +310,11 @@ Every valid IP coordinate becomes one Point feature in that email's layer:
   "properties": {
     "email_id": 101,
     "ip": "8.8.8.8",
-    "ip_type": "origin",
-    "count": 2,
+    "ip_type": "sender_origin_ip",
+    "ip_roles": ["sender_origin_ip", "recipient_server_ip"],
+    "ip_role_count": 2,
+    "ip_occurrence_total": 7,
+    "count": 5,
     "email_address": "person@example.com",
     "risk_level": "safe",
     "is_suspicious": false,
@@ -503,55 +326,79 @@ Every valid IP coordinate becomes one Point feature in that email's layer:
 }
 ```
 
-- Coordinates are stored as `[longitude, latitude]` in SRID 4326 through the existing PostGIS handling.
-- Latitude must be within `-90..90` and longitude within `-180..180`.
-- Missing or invalid coordinates create no geometry and are counted in `skipped_coordinates`.
+| Key | Meaning |
+| --- | --- |
+| `ip_type` | The role this point is filed under — the first by a fixed priority: `sender_origin_ip`, `sender_ip`, `origin_ip`, `recipient_server_ip`, `recipient_ip` |
+| `ip_roles` | Every role the provider reported for this IP |
+| `ip_role_count` | Number of roles |
+| `ip_occurrence_total` | Sum of `count` across all those roles |
+| `count` | Occurrences of the `ip_type` role only |
+
+- Coordinates are stored as `[longitude, latitude]` in SRID 4326 through the existing PostGIS handling. Latitude must be within `-90..90` and longitude within `-180..180`; missing or invalid coordinates are counted in `skipped_coordinates`.
 - The original `email_id` and `ip` are preserved in `properties` and are the feature's identity for duplicate detection.
-- Features are written through the existing batch feature service.
+- An email whose IPs have no usable coordinates is skipped whole: no layer, no broadcast, no `emails` row. The skips are still counted so the response totals add up, and the email imports normally once the provider sends coordinates.
 
-### module_slug
-
-Every layer and feature created by this integration uses `module_slug = "email-dump"`, validated against the centralized whitelist in `utils/constants.py` (`gis` / `email-dump` / `telecom-analysis`). The response never contains a null `module_slug`.
+Every layer and feature created by this integration uses `module_slug = "email-dump"`, validated against the whitelist in `utils/constants.py`. The response never contains a null `module_slug`.
 
 ### Stored tables
 
-The same import also writes the payload to three normalised tables, so it can be queried in SQL instead of extracted from `features.properties` JSON.
+The same import also writes the payload to four normalised tables, so it can be queried in SQL instead of extracted from `features.properties` JSON.
 
 | Table | One row per | Primary key |
 | --- | --- | --- |
-| `emails` | email and IP observation | `(case_id, email_id, ip)` |
-| `email_targets` | target reported for an email | `(case_id, target_id)` |
-| `email_dumps` | dump belonging to a target | `(case_id, dump_id)` |
+| `emails` | email and IP observation | `(case_id, email_id, ip, ip_type)` |
+| `email_targets` | target reported for a case | `(case_id, target_id)` |
+| `email_target_emails` | email that reported a target | `(case_id, target_id, email_id)` |
+| `email_dumps` | dump belonging to a target | `(case_id, target_id, dump_id)` |
 
-`emails` is the normalised form of the `email-dump` feature properties: `email_id`, `email_address`, `ip`, `ip_type`, `count`, `risk_level`, `is_suspicious`, `country`, `isp`, `first_seen`, `last_seen`. One row per (email, IP) pair keeps it 1:1 with the IP features, and the IP stays in the key because it is the grain of the data: a re-import of the same email and IP updates that row, while the same IP belonging to a *different* email is a separate row.
+`emails` is the normalised form of the feature properties, plus `layer_id` and timestamps. `ip_type` is part of the key because the provider's evidence that an IP filled two roles is two facts, not one — under a key without it the second observation overwrote the first, losing one role's count and timestamps entirely. The keys are the provider's own identifiers, so there is no backend-assigned `id` to keep in step, and the composite foreign key `(case_id, target_id)` on `email_dumps` means deleting a target still takes its dumps with it.
 
-The keys are the provider's own identifiers, so there is no backend-assigned `id` to keep in step with the payload. `email_dumps.target_id` is now the provider's target identifier, and a real composite foreign key `(case_id, target_id) -> email_targets(case_id, target_id)` replaces the old link to a local surrogate, so deleting a target still takes its dumps with it.
+**Targets reported by several emails.** A target is a person, and a person commonly has more than one address, so the same `target_id` arrives under several `email_id`s. `email_target_emails` keeps every address that reports a target; the single `email_id` column it replaced could only keep whichever was written last, so depending on payload order the import could silently connect the target to the wrong address. The target stays one row, so its dumps stay one row each. There is deliberately no `EmailRecord.targets` relationship — `emails` has one row per IP, so a collection hanging off an email row would repeat the target once per IP. The email → targets direction is a query, joining `email_target_emails` to `email_targets` on `(case_id, target_id)` and wanting `DISTINCT`.
 
-One link is necessarily weaker than before. `email_targets.email_id` was a foreign key to `emails.id`; it is now a plain indexed column holding the provider's `email_id`, because an email has one row per IP and so no single `emails` row for a target to point at. Deleting an email therefore no longer cascades to its targets — both are re-derivable from the provider on the next import.
+`email_target_emails.email_id` is *not* a foreign key to `emails`, because that table holds one row per IP observation, so `(case_id, email_id)` is not unique and cannot be referenced. A target stored by the listing before any import has no rows here, which is the truth rather than a `NULL` standing in for it. Migration `20260928_07`'s downgrade is lossy by construction: the restored column has one slot, so a target reported by several emails keeps only the smallest `email_id`. They return on the next import.
 
-All three tables also carry `layer_id`, a **required** foreign key to `layers.id` `ON DELETE CASCADE`, so a normalised row can always be traced back to the layer whose features it describes. Every imported email is a layer: the import creates one `Email {email_id}` layer per email, so the email shows up in the ordinary layers list and not only in SQL, and the rows written alongside it point at that layer. `layer_id` is `NOT NULL`, so the database rejects a row that names no layer; deleting a layer removes its rows with it.
+**`layer_id` on `emails` only.** It is a **required** foreign key to `layers.id` `ON DELETE CASCADE`, because the import creates one `Email {email_id}` layer per email and the table is 1:1 with the point features. `email_targets` and `email_dumps` do not carry it: neither has geometry, and they were storing the *email's* layer as a proxy, which is not a property of a target or a dump — a target reported by emails in two different layers has no single answer. Migration `20260928_06` removes both columns and the link is derived:
 
-Migration `20260928_05` enforces that. Rows left with a null `layer_id`, or naming a layer that no longer exists, are deleted rather than kept as dangling references — the foreign key cascade already prevents the second case, and such rows describe no layer, no features and no provider target, so the import recreates them from the provider on the next run. The count deleted per table is logged rather than dropped silently.
+```sql
+SELECT DISTINCT e.layer_id
+FROM email_targets AS t
+JOIN email_target_emails AS te
+  ON te.case_id = t.case_id AND te.target_id = t.target_id
+JOIN emails AS e
+  ON e.case_id = te.case_id AND e.email_id = te.email_id
+WHERE t.case_id = :case_id AND t.target_id = :target_id
+```
 
-`case_id` on all three tables is **not** a foreign key. GIS owns no `cases` table: cases and users belong to Central Intelligence (migration `20260904_01` removed the local case and user FKs deliberately). `case_id` is a plain indexed integer, matching `layers.case_id` and `features.case_id`.
+`DISTINCT` is needed twice over: `emails` has one row per IP so an email with four IPs matches four rows, and a target reported by two emails matches two more. All rows for one email carry the same `layer_id`, and a multi-email target legitimately spans several layers — which is exactly why `layer_id` never belonged on these tables. Dropping `NOT NULL` from the two columns is what unblocked the dropdown, since a selection names no email and therefore no layer; deleting a layer still cascades to `emails` but no longer to its neighbours, where the provider is the authority and the next listing or import rewrites the row.
 
-Provider `target_id` and `dump_id` are stored as text, so GIS does not assume the Email Dump Backend's identifier type. The provider is not consistent about sending them — the case-targets endpoint documents `target_id` as an integer while the per-case dumps endpoint leaves it untyped — so integer identifiers are coerced to their digit form on the way in rather than rejected. `targets` is optional in the upstream response, so the import works unchanged against the current payload and starts populating targets and dumps once the provider sends them.
+`case_id` on all four tables is **not** a foreign key. GIS owns no `cases` table — cases and users belong to Central Intelligence, and migration `20260904_01` removed the local case and user FKs deliberately. It is a plain indexed integer, matching `layers.case_id` and `features.case_id`. Provider `target_id` and `dump_id` are stored as text so GIS does not assume the provider's identifier type, and integer identifiers are coerced to their digit form on the way in rather than rejected.
 
-### Duplicate behavior
+#### Multi-select in the dropdowns
 
-The import is idempotent and case-scoped:
+Both dropdowns are multi-selects, so `target_id` arrives as one comma-separated string: `?target_id=1,2,3`. Values are trimmed, empty segments dropped and repeats collapsed. There is a cap of `MAX_TARGET_IDS_PER_REQUEST` (25) because a selection becomes that many upstream calls; a longer one is a 422. Ids are left opaque and not checked for being numeric, because the provider owns that type.
 
-- **Layer reuse** — match on `case_id` + layer name + `module_slug`.
-- **Feature reuse** — match on `layer_id` + `email_id` in `properties` + `ip` in `properties`.
-- **Email row reuse** — match on the key `(case_id, email_id, ip)`.
-- **Target row reuse** — match on the key `(case_id, target_id)`.
-- **Dump row reuse** — match on the key `(case_id, dump_id)`.
+The provider's dumps endpoint declares `target_id` as a single `integer`, so a comma-separated value cannot be forwarded to it. The dumps route fans out, one provider call per target, issued concurrently so the request waits on the slowest target rather than the sum. A dump reported under two targets is one dropdown entry but two stored rows, since the row is keyed on `(case_id, target_id, dump_id)`; the merge keeps the first occurrence and drops the rest. A target that fails does not fail the request — the others are still returned and `target_ids` echoes the whole selection — but if every target fails there is nothing to return, and the provider's error is raised rather than answered with a silently empty list.
 
-A repeated import of the same data creates no duplicates; it increments `layers_reused` / `features_reused` and reports the normalised writes as `emails_updated`, `targets_updated`, and `dumps_updated` rather than `*_created`.
+The origin-IP route forwards `target_id` and `dump_id` verbatim instead of fanning out, since the provider declares both as `string` there. That makes a comma-separated value type-legal and it reaches the provider intact, but nothing in the provider's spec says it splits the string — so a multi-select on *that* route depends on upstream behaviour that is not confirmed here.
+
+### Reconciliation
+
+The import is idempotent and case-scoped. It reconciles against the current payload rather than only inserting, so withdrawn data does not linger:
+
+| Counter | Meaning |
+| --- | --- |
+| `layers_created` / `layers_reused` | Layer written vs. matched on `case_id` + name + `module_slug` |
+| `features_created` / `features_updated` / `features_unchanged` / `features_removed` | Point features written, amended, left alone, or withdrawn |
+| `emails_created` / `emails_updated` / `emails_removed` | Normalised observations on the key `(case_id, email_id, ip, ip_type)` |
+| `targets_created` / `targets_updated` | Targets on `(case_id, target_id)` |
+| `dumps_created` / `dumps_updated` | Dumps on `(case_id, target_id, dump_id)` |
+| `skipped_coordinates` | IPs with missing or out-of-range coordinates |
+
+There is no `features_reused`: a feature is either created, amended, untouched, or removed, and the three cases are reported separately because "nothing to do" and "changed" mean different things to a client waiting on a map.
 
 ### WebSocket events
 
-New layers broadcast `layer.created` and newly created features broadcast `feature.batch_created` through the existing layer and feature managers. Nothing new is registered.
+New layers broadcast `layer.created`. Feature writes broadcast `feature.batch_created` for new points, `feature.batch_updated` for amended points, and `feature.batch_deleted` for withdrawn ones. Nothing new is registered.
 
 ### Errors
 
@@ -571,47 +418,27 @@ The upstream response body, provider credentials, bearer tokens, database connec
 
 ### Example
 
-Request:
-
 ```http
 GET /cases/123/email-dump/origin-ips?risk_level=high&country=India
 Authorization: Bearer <token>
 ```
 
-GIS then calls:
-
-```http
-GET http://192.168.6.63:8002/api/emails/single/origin-ips/123?risk_level=high&country=India
-Authorization: Bearer <token>
-```
-
-GIS response:
+GIS then calls `GET http://192.168.6.63:8002/api/emails/single/origin-ips/123?risk_level=high&country=India` with the same token, and answers:
 
 ```json
 {
   "success": true,
   "case_id": 123,
   "module_slug": "email-dump",
-  "layers_created": 1,
-  "layers_reused": 2,
-  "features_created": 5,
-  "features_reused": 3,
+  "layers_created": 1, "layers_reused": 2,
+  "features_created": 5, "features_updated": 1, "features_unchanged": 3, "features_removed": 0,
   "skipped_coordinates": 1,
-  "emails_created": 2,
-  "emails_updated": 0,
-  "targets_created": 1,
-  "targets_updated": 0,
-  "dumps_created": 2,
-  "dumps_updated": 0,
+  "emails_created": 6, "emails_updated": 0, "emails_removed": 0,
+  "targets_created": 1, "targets_updated": 0,
+  "dumps_created": 2, "dumps_updated": 0,
   "layers": [
-    {
-      "id": 25,
-      "case_id": 123,
-      "name": "Email 101",
-      "layer_type": "email",
-      "module_slug": "email-dump",
-      "visible": true
-    }
+    { "id": 25, "case_id": 123, "name": "Email 101",
+      "layer_type": "email", "module_slug": "email-dump", "visible": true }
   ]
 }
 ```
@@ -627,25 +454,19 @@ The raw Email Dump payload is never returned to the frontend.
 /ws/cases/{case_id}/layers/{layer_id}/features/{feature_number}/comments
 ```
 
-WebSocket events include:
-
 ```text
-feature.created
-feature.updated
-feature.deleted
-feature.batch_created
-feature.batch_import_completed
-layer.created
-layer.updated
-layer.deleted
-comment.created
-comment.reply_created
-comment.deleted
+feature.created            feature.batch_created
+feature.updated            feature.batch_import_completed
+feature.deleted            feature.batch_updated
+                           feature.batch_deleted
+layer.created              comment.created
+layer.updated              comment.reply_created
+layer.deleted              comment.deleted
 ```
 
 ## Measurement Features
 
-Measurements are saved as normal features with:
+Measurements are saved as normal features:
 
 ```json
 {
@@ -661,8 +482,6 @@ The backend stores the provided distance as-is and does not recompute it server-
 
 ## Notes
 
-- Main application geometries use SRID 4326.
-- MapServer OSM geometries commonly use SRID 3857, so hotspot queries transform geometries before spatial comparison.
+- Main application geometries use SRID 4326. MapServer OSM geometries commonly use SRID 3857, so hotspot queries transform geometries before spatial comparison.
 - The backend uses typed application exceptions from `utils/exceptions.py`.
-- Logs are written under `logs/`.
-- Uploaded files are stored under `uploads/`.
+- Logs are written under `logs/`; uploaded files are stored under `uploads/`.

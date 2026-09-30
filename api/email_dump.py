@@ -20,17 +20,6 @@ from utils.roles import CAN_WRITE
 router = APIRouter(tags=["Email Dump"])
 
 
-# ===================================================
-# EMAIL DUMP ORIGIN IPS
-# ===================================================
-# Frontend -> GIS Backend -> Email Dump Backend. The frontend never
-# calls the Email Dump Backend directly: this route is the only entry
-# point, it forwards the caller's bearer token upstream, and it returns
-# a GIS-specific summary of the layers and features it persisted.
-#
-# Write access is required because the import creates layers and
-# features, exactly like the other persisting routes.
-
 @router.get(
     "/cases/{case_id}/email-dump/origin-ips",
     response_model=EmailDumpOriginIpImportResponse,
@@ -53,7 +42,6 @@ async def get_email_dump_origin_ips(
     access_token: str = Depends(get_access_token),
     current_user=Depends(require_roles_for_case(CAN_WRITE)),
 ) -> EmailDumpOriginIpImportResponse:
-    """Fetch origin IPs for a case from Email Dump and store them in GIS."""
     query = EmailDumpOriginIpQuery(
         view_type=view_type,
         target_id=target_id,
@@ -96,13 +84,6 @@ async def get_email_dump_targets(
     access_token: str = Depends(get_access_token),
     current_user=Depends(require_roles_for_case(CAN_WRITE)),
 ) -> EmailDumpTargetsResponse:
-    """List the targets Email Dump knows about for a case.
-
-    This is what populates the target list. Each target already carries
-    its `dump_ids`, so a frontend can build a dump dropdown from this
-    response alone and only needs the dumps route when it needs a dump's
-    counters.
-    """
     logger.info(
         "GET /cases/%s/email-dump/targets | user_id=%s | role=%s",
         case_id,
@@ -113,16 +94,6 @@ async def get_email_dump_targets(
     return await list_targets(case_id, access_token, db)
 
 
-# ===================================================
-# EMAIL DUMP DUMPS
-# ===================================================
-# Same proxy shape as the import above, but read-oriented: the frontend
-# calls it when the user picks a target, to fill the dump dropdown.
-#
-# The same CAN_WRITE gate applies. Targets are only ever shown for a case
-# the user can write to, since both this route and the import above are
-# gated the same way.
-
 @router.get(
     "/cases/{case_id}/email-dump/dumps",
     response_model=EmailDumpListResponse,
@@ -131,20 +102,24 @@ async def get_email_dump_targets(
 )
 async def get_email_dump_dumps(
     case_id: int,
-    target_id: str = Query(description="Email Dump target identifier"),
+    target_id: str = Query(
+        description=(
+            "One or more Email Dump target identifiers, comma-separated "
+            "for a multi-select, e.g. target_id=1 or target_id=1,2,3"
+        )
+    ),
     db: Session = Depends(get_db),
     access_token: str = Depends(get_access_token),
     current_user=Depends(require_roles_for_case(CAN_WRITE)),
 ) -> EmailDumpListResponse:
-    """Fetch and cache the dumps belonging to one Email Dump target."""
     query = EmailDumpDumpsQuery(target_id=target_id)
 
     logger.info(
-        "GET /cases/%s/email-dump/dumps | user_id=%s | role=%s | target_id=%s",
+        "GET /cases/%s/email-dump/dumps | user_id=%s | role=%s | target_ids=%s",
         case_id,
         current_user["user_id"],
         current_user["role"],
-        query.target_id,
+        query.target_ids,
     )
 
-    return await list_dumps(case_id, query.target_id, access_token, db)
+    return await list_dumps(case_id, query.target_ids, access_token, db)

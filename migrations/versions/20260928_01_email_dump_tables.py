@@ -1,33 +1,3 @@
-"""Add `emails`, `email_targets` and `email_dumps`.
-
-Normalises the Email Dump payload that previously only existed inside
-`features.properties`, so it is queryable in SQL and no longer depends on
-JSON extraction to look up an email or its IPs.
-
-Shape:
-  * `emails`        - one row per (case_id, email_id, ip). This is the
-                      normalised form of the `email-dump` feature
-                      properties, so it still maps 1:1 to the IP features
-                      the import creates.
-  * `email_targets` - provider target identifiers reported for an email.
-                      `email_id` FKs to `emails.id`.
-  * `email_dumps`   - dumps belonging to a target. `target_id` FKs to
-                      `email_targets.id`.
-
-`case_id` is deliberately NOT a foreign key. GIS owns no `cases` table:
-migration 20260904_01 removed the local user and case FKs because both
-users and cases are owned by Central Intelligence. `case_id` is therefore
-a plain indexed integer, matching `layers.case_id` and
-`features.case_id`. Only the internal email -> target -> dump chain uses
-real foreign keys, with ON DELETE CASCADE so removing an email removes its
-targets and their dumps.
-
-Names are qualified per table rather than left ambiguous: the FK column on
-`email_dumps` is `target_id` (local surrogate key) while the provider's own
-identifier is `email_targets.target_id`. This migration is idempotent and
-only creates each object when missing, so it is safe to re-run.
-"""
-
 from alembic import op
 import sqlalchemy as sa
 
@@ -59,12 +29,9 @@ def _create_emails() -> None:
     op.create_table(
         "emails",
         sa.Column("id", sa.Integer, primary_key=True),
-        # External Central Intelligence case id, intentionally not an FK.
         sa.Column("case_id", sa.Integer, nullable=False),
-        # External Email Dump Backend email id, not a local FK either.
         sa.Column("email_id", sa.Integer, nullable=False),
         sa.Column("email_address", sa.Text, nullable=True),
-        # 45 = max IPv6 textual length, so both IPv4 and IPv6 fit.
         sa.Column("ip", sa.String(length=45), nullable=False),
         sa.Column("ip_type", sa.String(length=50), nullable=True),
         sa.Column("count", sa.Integer, nullable=True),
@@ -102,8 +69,6 @@ def _create_email_targets() -> None:
             sa.ForeignKey("emails.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        # Provider target identifier, kept as text: GIS must not assume
-        # the provider's identifier type.
         sa.Column("target_id", sa.String(length=100), nullable=False),
         sa.Column("target_name", sa.Text, nullable=True),
         sa.Column(
@@ -159,8 +124,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     inspector = sa.inspect(op.get_bind())
 
-    # Reverse dependency order. Tables are dropped whole, so the indexes
-    # and unique constraints inside them go with them.
     for table in ("email_dumps", "email_targets", "emails"):
         if _table_exists(inspector, table):
             op.drop_table(table, schema=SCHEMA)

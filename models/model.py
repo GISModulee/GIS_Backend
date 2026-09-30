@@ -191,38 +191,16 @@ class ImageRecord(Base):
 
 
 class EmailRecord(Base):
-    """One Email Dump email and one IP observed for it.
-
-    This is the normalised form of the payload that used to live only in
-    `features.properties` for the `email-dump` module. One row per
-    (case_id, email_id, ip) pair, so it still maps 1:1 to the IP features
-    the import creates.
-
-    The provider's own identifiers are the primary key: there is no
-    system-generated `id`. The IP is part of that key because it is the
-    grain of the data, not an implementation detail.
-
-    `case_id` is an external Central Intelligence case identifier, not a
-    local foreign key: GIS owns no `cases` table (see migration
-    20260904_01, which removed the local user and case FKs). It is a
-    plain indexed integer here, exactly as on `layers` and `features`.
-
-    `layer_id` points at the GIS layer holding this row's feature, so a
-    normalised row can be traced back to the map. It cascades with the
-    layer: the row describes that layer's features, so it goes when the
-    layer is deleted.
-    """
 
     __tablename__ = "emails"
 
     case_id = Column(Integer, primary_key=True, index=True)
 
-    # Identifier assigned by the Email Dump Backend, not local.
     email_id = Column(Integer, primary_key=True, index=True)
     email_address = Column(Text, nullable=True)
 
     ip = Column(String(45), primary_key=True)
-    ip_type = Column(String(50), nullable=True)
+    ip_type = Column(String(50), primary_key=True)
     count = Column(Integer, nullable=True)
 
     risk_level = Column(String(50), nullable=True)
@@ -242,70 +220,27 @@ class EmailRecord(Base):
         index=True,
     )
 
-    targets = relationship(
-        "EmailTarget",
-        back_populates="email",
-        # No cascade from the database side any more: email_targets
-        # references the provider's email_id, not a row of this table,
-        # so an email and its targets are two independent lookups by
-        # (case_id, email_id).
-        viewonly=True,
-        primaryjoin="and_(EmailRecord.case_id == EmailTarget.case_id, "
-        "foreign(EmailTarget.email_id) == EmailRecord.email_id)",
-    )
-
     __table_args__ = (
-        # The provider's identifiers form the key, so re-importing the
-        # same email/IP pair updates the existing row by construction
-        # and there is no separate unique constraint to maintain.
     )
 
 
 class EmailTarget(Base):
-    """A target identifier reported for an email by Email Dump.
-
-    The primary key is (case_id, target_id): the provider's own
-    identifier, unique within a case, with no system-generated `id` on
-    top of it.
-
-    `target_id` is kept as text so the backend never assumes the
-    provider's ID type. The provider's target listing returns it as an
-    integer while the dumps endpoint leaves it untyped, so storing text
-    and forwarding strings keeps both call sites working.
-
-    `email_id` is the provider's email identifier, not a foreign key. It
-    used to reference `emails.id`, but an email can have several IP rows
-    and so has no single `emails` row to point at; a foreign key would
-    force one IP row per target. Deleting an email therefore no longer
-    cascades to its targets, and both are re-derived from the provider on
-    the next import.
-
-    The row is also written by the case-targets listing, so a target the
-    provider reports but whose email has never been imported exists here
-    with a null `email_id`. That is why the column is nullable.
-    """
 
     __tablename__ = "email_targets"
 
     case_id = Column(Integer, primary_key=True, index=True)
     target_id = Column(String(100), primary_key=True)
 
-    # The provider's email_id, indexed for the email -> targets lookup.
-    email_id = Column(Integer, nullable=True, index=True)
     target_name = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # No layer_id: a target has no geometry of its own, so it does not
-    # belong to a layer. The layer is reached through `email_id` and the
-    # `emails` rows, which is a property of the email, not the target.
 
-    email = relationship(
-        "EmailRecord",
-        back_populates="targets",
-        viewonly=True,
-        primaryjoin="and_(EmailTarget.case_id == EmailRecord.case_id, "
-        "foreign(EmailTarget.email_id) == EmailRecord.email_id)",
+    emails_ = relationship(
+        "EmailTargetEmail",
+        back_populates="target",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     dumps = relationship(
         "EmailDump",
@@ -315,51 +250,54 @@ class EmailTarget(Base):
     )
 
     __table_args__ = (
-        # (case_id, target_id) is the key, so the provider's identifier
-        # is unique within a case by construction.
+    )
+
+
+class EmailTargetEmail(Base):
+
+    __tablename__ = "email_target_emails"
+
+    case_id = Column(Integer, primary_key=True, index=True)
+    target_id = Column(String(100), primary_key=True)
+    email_id = Column(Integer, primary_key=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    target = relationship(
+        "EmailTarget",
+        back_populates="emails_",
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "target_id"],
+            ["email_targets.case_id", "email_targets.target_id"],
+            ondelete="CASCADE",
+        ),
     )
 
 
 class EmailDump(Base):
-    """A dump belonging to a target.
-
-    The primary key is (case_id, dump_id): the provider's own dump
-    identifier, unique within a case. `target_id` is the provider's
-    target identifier, and the composite foreign key
-    (case_id, target_id) -> email_targets is a real constraint, so
-    deleting a target still removes its dumps.
-    """
 
     __tablename__ = "email_dumps"
 
-    case_id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, primary_key=True)
+    target_id = Column(String(100), primary_key=True, index=True)
     dump_id = Column(String(100), primary_key=True)
 
-    # The provider's target identifier. Part of the composite foreign
-    # key to email_targets declared in __table_args__, not the identity
-    # of this row, which is (case_id, dump_id).
-    target_id = Column(String(100), nullable=False, index=True)
 
     name = Column(Text, nullable=True)
 
-    # Upstream a dump is a bag of counters rather than a labelled
-    # record, so these are what the per-case dump listing contributes.
-    # A dump has no human-readable name, so `name` remains the best
-    # available text for a dropdown entry.
     total_emails = Column(Integer, nullable=True)
     malicious_count = Column(Integer, nullable=True)
     unique_senders = Column(Integer, nullable=True)
     unique_recipients = Column(Integer, nullable=True)
     start_date = Column(DateTime, nullable=True)
     end_date = Column(DateTime, nullable=True)
-    # The provider's own creation time, distinct from our `created_at`.
     provider_created_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # No layer_id: a dump is a bag of counters with no geometry, so it
-    # does not belong to a layer. Its layer, if one is wanted, is reached
-    # through the target and that target's email.
 
     target = relationship(
         "EmailTarget",
@@ -369,17 +307,12 @@ class EmailDump(Base):
     )
 
     __table_args__ = (
-        # A real link to the target, on the two columns the target is
-        # keyed by. Declared here rather than as a column-level
-        # ForeignKey because it spans both.
         ForeignKeyConstraint(
             ["case_id", "target_id"],
             ["email_targets.case_id", "email_targets.target_id"],
             ondelete="CASCADE",
             name="fk_email_dumps_target",
         ),
-        # (case_id, dump_id) is the key, so the provider's dump
-        # identifier is unique within a case by construction.
     )
 
 
