@@ -11,6 +11,7 @@ from api.email_dump import router as email_dump_router
 from api.features import router as feature_router
 from api.features_read import router as feature_read_router
 from api.features_ws import router as feature_ws_router
+from api.frs import router as frs_router
 from api.geo_search import router as geo_search_router
 from api.geoclip import router as geoclip_router
 from api.hotspots import router as hotspot_router
@@ -41,6 +42,7 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(geo_search_router)
     app.include_router(hotspot_router)
     app.include_router(email_dump_router)
+    app.include_router(frs_router)
     app.include_router(aircraft_router)
     app.include_router(satellite_router)
     app.include_router(system_router)

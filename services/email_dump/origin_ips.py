@@ -3,7 +3,7 @@ import math
 
 import httpx
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from models.model import (
@@ -716,6 +716,54 @@ async def _broadcast_features_deleted(
     )
 
 
+def _case_totals(case_id: int, db) -> dict[str, int]:
+    try:
+        targets = db.scalar(
+            select(func.count())
+            .select_from(EmailTarget)
+            .where(EmailTarget.case_id == case_id)
+        )
+        dumps = db.scalar(
+            select(func.count())
+            .select_from(EmailDump)
+            .where(EmailDump.case_id == case_id)
+        )
+        ips = db.scalar(
+            select(func.count())
+            .select_from(EmailRecord)
+            .where(EmailRecord.case_id == case_id)
+        )
+        emails = db.scalar(
+            select(func.count(distinct(EmailRecord.email_id))).where(
+                EmailRecord.case_id == case_id
+            )
+        )
+        features = db.scalar(
+            select(func.count())
+            .select_from(Feature)
+            .where(
+                Feature.case_id == case_id,
+                Feature.module_slug == EMAIL_DUMP_MODULE_SLUG,
+            )
+        )
+    except SQLAlchemyError as exc:
+        logger.error(
+            "Email Dump totals failed | case_id=%s | error=%s",
+            case_id,
+            exc,
+            exc_info=True,
+        )
+        raise ServiceUnavailableError(EMAIL_DUMP_IMPORT_FAILED) from exc
+
+    return {
+        "targets": targets or 0,
+        "dumps": dumps or 0,
+        "emails": emails or 0,
+        "ips": ips or 0,
+        "features": features or 0,
+    }
+
+
 async def import_origin_ips(
     case_id: int,
     query: EmailDumpOriginIpQuery,
@@ -867,16 +915,20 @@ async def import_origin_ips(
         counts["dumps_updated"],
     )
 
+    totals = _case_totals(case_id, db)
+    logger.info(
+        "Email Dump case totals | case_id=%s | targets=%s | dumps=%s | emails=%s | "
+        "ips=%s | features=%s",
+        case_id,
+        totals["targets"],
+        totals["dumps"],
+        totals["emails"],
+        totals["ips"],
+        totals["features"],
+    )
+
     return EmailDumpOriginIpImportResponse(
         case_id=case_id,
-        module_slug=EMAIL_DUMP_MODULE_SLUG,
-        layers_created=layers_created,
-        layers_reused=layers_reused,
-        features_created=features_created,
-        features_updated=features_updated,
-        features_unchanged=features_unchanged,
-        features_removed=features_removed,
-        skipped_coordinates=skipped_coordinates,
         layers=layers,
-        **counts,
+        **totals,
     )

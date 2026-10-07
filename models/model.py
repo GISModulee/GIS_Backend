@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Boolean,
+    Index,
     UniqueConstraint,
     CheckConstraint,
 )
@@ -332,3 +333,204 @@ class GeoNewsSearchHistory(Base):
     end_date = Column(DateTime(timezone=True), nullable=True)
     max_results = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# FRS registry tables
+#
+# These hold the provider's records as real rows, alongside the map layer
+# rather than instead of it. The layer answers "where on the map"; the
+# person history import deliberately collapses per-detection entries into
+# one point per camera, which is right for a map and destroys exactly the
+# ordering a route view needs. The registry keeps the raw detections so
+# "in what order was this person seen" survives.
+#
+# They follow the email_dump precedent: composite natural keys built from
+# provider ids, composite foreign keys, and real columns for provider
+# fields rather than an opaque JSON blob.
+# ---------------------------------------------------------------------------
+
+
+class FrsCamera(Base):
+    """One row per camera in the provider's global camera registry.
+
+    Deliberately NOT case-scoped. The provider owns one registry, sends
+    no case filter on GET /api/cameras, and the same cameras serve every
+    case. A camera imported into three cases is therefore one row here and
+    three layers in `layers`; the case-scoped layer is what carries the
+    case relationship, and duplicating this row per case would let three
+    copies drift apart.
+
+    camera_id is the provider id rather than a surrogate because it is the
+    sync key every import resolves against, including the sighting FK.
+    """
+
+    __tablename__ = "frs_cameras"
+
+    camera_id = Column(String(100), primary_key=True)
+    name = Column(Text, nullable=True)
+    zone = Column(String(100), nullable=True)
+    status = Column(String(50), nullable=True)
+
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    # The provider's own case association, recorded for traceability only.
+    # The registry is global, so GIS decides placement; this is not what
+    # determines where the camera goes or which case it lands in.
+    frs_case_id = Column(String(100), nullable=True)
+
+    # When the camera last moved. Sightings deliberately keep the position
+    # they were captured at, so this is the only record that the camera is
+    # no longer where its historical sightings say it was.
+    coordinates_changed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FrsPerson(Base):
+    """One row per person the provider holds for a case.
+
+    Case-scoped, unlike cameras: GET /api/persons requires case_id, a
+    person's registry membership is a per-case fact, and their sightings
+    are evidence within that case.
+
+    person_id is a String even though the provider declares it as an
+    integer, for the same reason camera ids are strings: it is a sync key
+    and a payload, a fixture or a future upstream change can deliver it as
+    a string, and int 12 and "12" must not resolve to two rows.
+
+    The provider's thumbnail is deliberately NOT a column here. It is
+    display-only and tens of kilobytes per person, so there is nothing to
+    query, join or retain by storing it; it is forwarded verbatim on
+    GET .../persons responses instead, and this table stays out of it.
+    """
+
+    __tablename__ = "frs_persons"
+
+    case_id = Column(Integer, primary_key=True, index=True)
+    person_id = Column(String(100), primary_key=True)
+
+    name = Column(Text, nullable=True)
+    organization = Column(Text, nullable=True)
+
+    tags = Column(JSON, nullable=True)
+    # The provider's multi-case membership array, stored verbatim. A person
+    # can belong to several cases at once, so this is a list rather than
+    # the single frs_case_id the camera payload carries.
+    provider_case_ids = Column(JSON, nullable=True)
+
+    # Set by the history import, which is what creates the layer. Nullable
+    # and SET NULL because a person can sit in the case's person dropdown
+    # long before anyone pulls their history, and deleting the layer must
+    # not delete the record that the person exists.
+    layer_id = Column(
+        Integer, ForeignKey("layers.id", ondelete="SET NULL"), nullable=True
+    )
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    sightings = relationship(
+        "FrsPersonSighting",
+        back_populates="person",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class FrsPersonSighting(Base):
+    """One row per raw detection. This is the table routes are built on.
+
+    The provider emits no per-detection id, so the durable key is
+    (case_id, person_id, video_id, camera_id, started_at) enforced by a
+    unique constraint. The surrogate `id` column carries the primary key
+    instead, because video_id may be NULL: a `source: "camera"` detection
+    is reported with a camera and a timestamp but no video, and dropping
+    it used to mean the richest detections never reached the route.
+    video_id carries the weight where it exists: one video is one camera
+    recording on one clock, so timestamps inside a single video_id are
+    mutually consistent. Camera-source detections without a video fall
+    back to the provider's own UTC timestamp for ordering.
+
+    latitude/longitude SNAPSHOT the camera's own position as reported on
+    this detection. Joining to frs_cameras instead would silently
+    relocate historical evidence every time a camera is repositioned,
+    rewriting where past sightings were actually captured. The
+    disagreement between the snapshot and the current registry position is
+    recorded as camera_moved.
+    """
+
+    __tablename__ = "frs_person_sightings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    case_id = Column(Integer, nullable=False)
+    person_id = Column(String(100), nullable=False)
+    video_id = Column(String(100), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+
+    camera_id = Column(
+        String(100),
+        ForeignKey("frs_cameras.camera_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    camera_name = Column(Text, nullable=True)
+
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    confidence = Column(Float, nullable=True)
+    similarity = Column(Float, nullable=True)
+    source = Column(String(100), nullable=True)
+    video_filename = Column(Text, nullable=True)
+
+    # True when the camera had a registry position at import time and this
+    # entry's coordinates disagreed with it. False means "consistent", and
+    # also covers a camera absent from the registry, which has no known
+    # position to disagree with.
+    camera_moved = Column(
+        Boolean, nullable=False, server_default="false"
+    )
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    person = relationship(
+        "FrsPerson",
+        back_populates="sightings",
+        primaryjoin="and_(FrsPersonSighting.case_id == FrsPerson.case_id, "
+        "FrsPersonSighting.person_id == FrsPerson.person_id)",
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["case_id", "person_id"],
+            ["frs_persons.case_id", "frs_persons.person_id"],
+            ondelete="CASCADE",
+            name="fk_frs_sightings_person",
+        ),
+        # The idempotency key for both detection kinds. video_id is NULL
+        # for camera-source detections, so this is a UNIQUE constraint on
+        # nullable columns: PostgreSQL's index treats NULLs as distinct,
+        # but upsert_sightings matches on the same key in Python before
+        # writing, which is what actually deduplicates a re-import.
+        UniqueConstraint(
+            "case_id",
+            "person_id",
+            "video_id",
+            "camera_id",
+            "started_at",
+            name="uq_frs_sightings_detection_key",
+        ),
+        # The ordered read path: one person's route, in time order.
+        Index(
+            "ix_frs_sightings_person_started_at",
+            "case_id",
+            "person_id",
+            "started_at",
+        ),
+    )

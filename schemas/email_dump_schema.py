@@ -5,7 +5,6 @@ from typing import Any
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from schemas.layer_schema import LayerResponse
-from utils.constants import EMAIL_DUMP_MODULE_SLUG
 from utils.exceptions import UnprocessableEntityError
 
 
@@ -229,19 +228,9 @@ class EmailDumpListResponse(BaseModel):
 class EmailDumpOriginIpImportResponse(BaseModel):
     success: bool = True
     case_id: int
-    module_slug: str = EMAIL_DUMP_MODULE_SLUG
-    layers_created: int
-    layers_reused: int
-    features_created: int
-    features_updated: int
-    features_unchanged: int
-    features_removed: int
-    skipped_coordinates: int
-    emails_created: int = 0
-    emails_updated: int = 0
-    emails_removed: int = 0
-    targets_created: int = 0
-    targets_updated: int = 0
-    dumps_created: int = 0
-    dumps_updated: int = 0
+    targets: int
+    dumps: int
+    emails: int
+    ips: int
+    features: int
     layers: list[LayerResponse]

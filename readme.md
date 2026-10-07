@@ -1,6 +1,6 @@
 # GIS Backend
 
-FastAPI backend for a PostgreSQL/PostGIS case-management platform. It manages cases, layers, map features, comments, file imports, GeoCLIP image predictions, vector operations, geo-news search, live satellite and aircraft positions, hotspot discovery from a separate MapServer/PostGIS database, and the Email Dump integration.
+FastAPI backend for a PostgreSQL/PostGIS case-management platform. It manages cases, layers, map features, comments, file imports, GeoCLIP image predictions, vector operations, geo-news search, live satellite and aircraft positions, hotspot discovery from a separate MapServer/PostGIS database, and the Email Dump and Face Recognition System integrations.
 
 ## Tech Stack
 
@@ -53,6 +53,9 @@ MODULE_SLUG=spatial-geographical-analysis
 EMAIL_DUMP_API_BASE_URL=http://192.168.6.63:8002
 EMAIL_DUMP_TIMEOUT_SECONDS=30
 
+FRS_API_BASE_URL=http://192.168.6.63:8003
+FRS_TIMEOUT_SECONDS=30
+
 OPENSKY_BASE_URL=https://opensky-network.org/api
 OPENSKY_TIMEOUT_SECONDS=15
 AIRCRAFT_CACHE_TTL_SECONDS=30
@@ -63,7 +66,7 @@ SATELLITE_POSITION_CACHE_TTL_SECONDS=5
 SATELLITE_MAX_RESULTS=500
 ```
 
-`DATABASE_URL` is the main application database. `MAPSERVER_DATABASE_URL` is optional for the app in general but required for hotspot search. `EMAIL_DUMP_API_BASE_URL` is also optional: when empty the application still starts, and only the Email Dump routes report a configuration error.
+`DATABASE_URL` is the main application database. `MAPSERVER_DATABASE_URL` is optional for the app in general but required for hotspot search. `EMAIL_DUMP_API_BASE_URL` and `FRS_API_BASE_URL` are also optional: when empty the application still starts, and only the Email Dump and Face Recognition System routes report a configuration error.
 
 ## Setup
 
@@ -98,6 +101,7 @@ sudo apt-get install libmagic1
 | `gis` | Core GIS operations: manual layers, imports, measurements, GeoCLIP, hotspots, vector operations |
 | `email-dump` | Email intelligence integrations |
 | `telecom-analysis` | Telecom / phone-number analysis integrations |
+| `face-recognition-system` | Face Recognition System camera imports |
 
 - Manual layer creation must send a valid `module_slug`; `null`, empty, whitespace-only, or unknown values are rejected.
 - Automatically created layers inherit the `module_slug` of the feature being created when no `layer_id` is supplied. Ordinary GIS-created features use `gis`.
@@ -254,6 +258,197 @@ Frontend  →  GIS Backend  →  Email Dump Backend
 
 The GIS backend is the integration layer. It does not replace or duplicate the Email Dump backend: email analysis, email records, email IDs, risk analysis, origin-IP analysis, and Email Dump authentication all stay upstream. The frontend never calls the Email Dump backend directly — it calls the GIS route, which forwards the request and converts the answer into GIS layers and features.
 
+## Face Recognition System Cameras
+
+```text
+Frontend  →  GIS Backend  →  Face Recognition System
+```
+
+The frontend never calls FRS directly — it calls GIS, which forwards the caller's bearer token and converts the provider payload into GIS layers and features.
+
+```text
+GET /face-recognition-system/cameras[?case_id={id}]
+GET /cases/{case_id}/face-recognition-system/persons
+GET /cases/{case_id}/face-recognition-system/persons/{person_id}/history?person_name={name}
+GET /cases/{case_id}/face-recognition-system/persons/{person_id}/route?limit={n}
+```
+
+Upstream endpoints, called by GIS only:
+
+```text
+GET {FRS_API_BASE_URL}/api/cameras
+GET {FRS_API_BASE_URL}/api/persons?case_id={case_id}
+GET {FRS_API_BASE_URL}/api/persons/{person_id}/history?case_id={case_id}
+```
+
+The provider URL is always built from `settings.FRS_API_BASE_URL`; the host and port are never hard-coded in service logic.
+
+**One cameras route, registry global.** The camera registry is global, so `case_id` is optional upstream and GIS does not send it — the same cameras serve every case, and filtering by case would hide cameras not yet attributed to this one. `GET /face-recognition-system/cameras` mirrors that: no case in the path. Every call fetches the provider registry, upserts the global `frs_cameras` rows and returns what is stored (`data`, with each camera's latitude and longitude — the frontend plots its pins from these), cameras the provider has stopped reporting included, since the registry is never pruned. Passing an **optional** `?case_id=` additionally runs the case-scoped import on top: one layer per camera, one point feature at its fix, and the layer/feature counts in the same response — so the frontend passes its current case when it wants the pins drawn as GIS layers, and omits it when it just wants the registry. Both person endpoints are case-scoped, so `case_id` is required upstream and GIS always sends it.
+
+### Authentication
+
+All four routes use standard GIS authentication, and the three that call FRS forward the caller's own token so FRS applies its own authorization against the same CI identity GIS already validated (the route endpoint is local-only and never calls FRS):
+
+```python
+access_token = Depends(get_access_token)
+current_user = Depends(require_roles_for_case(CAN_WRITE))  # the three case-scoped routes
+current_user = Depends(require_roles(ALL_ROLES))           # /face-recognition-system/cameras (base gate)
+# and, only when ?case_id= was supplied:
+case_user  = await authorize_case(access_token, case_id)   # token + case access
+enforce_role(case_user, CAN_WRITE)                         # same write role as before
+```
+
+The registry read takes any authenticated role via `require_roles(ALL_ROLES)`: with no case in the path there is no case membership to validate against, and a valid token is still required (and still forwarded to FRS). The moment `case_id` is supplied the old case-scoped cameras route's gate applies **in full, before anything is written** — `authorize_case` for token + case access, then the `CAN_WRITE` check — so an import into a case is exactly as protected as it was when the route had the case in its path.
+
+The write role is also required on the three case-scoped routes, including the sync-on-read persons listing and the route endpoint: person registry membership and sighting history are investigative data. **GIS mints, stores and rotates no FRS credential.** There is no auth config to add — the provider reuses the CI token.
+
+### Mapping rules
+
+**camera_id → layer.** One layer per camera, named `FRS Camera {camera_id}` with `layer_type = "camera"`. The provider id is the sync key, never the display name: a name is not unique (two cameras can both be "Gate 2") and can exceed the `String(100)` width, so keying on a name would either collide or truncate into a second unreconcilable layer. If a pathological id overflows the column, the fixed prefix is kept and the id is truncated to the remaining budget. The `FRS Camera` / `FRS Person` prefixes exist so a hand-made analyst layer cannot collide and abort the whole import on the `uq_layers_case_id_name` constraint.
+
+**camera → feature.** One Point feature per camera, at `[longitude, latitude]` in SRID 4326.
+
+```json
+{
+  "name": "FRS Camera 12",
+  "geometry_type": "Point",
+  "geometry": { "type": "Point", "coordinates": [55.27, 25.2] },
+  "module_slug": "face-recognition-system",
+  "properties": {
+    "camera_id": "12", "camera_name": "Gate 2", "zone": "North",
+    "status": "online", "frs_case_id": "7",
+    "latitude": 25.2, "longitude": 55.27
+  }
+}
+```
+
+`frs_case_id` is kept for traceability back to the provider's records but plays no part in placement, because the registry is global.
+
+**Coordinates.** Latitude must be within `-90..90`, longitude within `-180..180`. Longitude is the only axis that is folded: values in `(180.0, 360.0]` become `value - 360.0`, which accepts the provider's 0-360 east-positive form without relocating anything. Values outside the window are left alone so the range check rejects them. **Latitude is never folded** — a shared step over both axes would turn corrupt data into valid data (`lat=359` would become `-1.0`, `lat=270` would become `-90.0`) and silently relocate a camera. A camera with no usable fix, or at `(0, 0)`, is skipped: `(0, 0)` is a real point in the Gulf of Guinea but FRS uses it as its "no fix" sentinel, and plotting it would place a fake observation in the Atlantic.
+
+**No sync timestamp in `properties`.** A timestamp would differ on every run, so the unchanged check could never match and every panel open would rewrite and re-broadcast every camera to every open map for no reason. `Feature.updated_at` already records the write.
+
+**person → layer.** One layer per person per history import, named `FRS Person {person_name} ({person_id})` with `layer_type = "person"`. The id is the sync key and is never the part that gets truncated: the display name gives way instead, and the ` ({person_id})` suffix survives intact. `person_name` is optional, so a history imported without one is named `FRS Person ({person_id})` and still reconciles on the id.
+
+**Detections → features, collapsed per camera.** The provider emits **one history entry per detection**, so a person walking past a camera produces a long run of entries at the same coordinates. They are collapsed into one point per camera carrying `sighting_count` — the number of detections behind it, so "seen once" and "seen many times" are distinguishable on the map without opening a popup — plus `first_seen` / `last_seen` and the distinct `videos` the detections came from. One feature per entry would stack near-identical pins and bury the places that actually matter.
+
+| Decision | Rule | Why |
+| --- | --- | --- |
+| `confidence` / `similarity` | **max** of the group's non-null values | A repeat detection carries its own score; taking the first entry's value would let an earlier, weaker detection hide a later, stronger match |
+| `first_seen` / `last_seen` | `min(started_at)` / `max(ended_at)` over the raw strings | The provider emits ISO-8601 with a fixed UTC offset, which orders lexicographically exactly as it orders chronologically, so no parsing is needed |
+| Grouping key | camera id (`camera:{id}`), falling back to coordinates (`point:{long},{lat}`) | Two cameras at the same spot are still **two places the person was seen from**, with different fields of view and different footage. Grouping by coordinate pair would merge them. Entries with no camera id fall back to coordinates so two unattributed detections at one spot still collapse to one point |
+| `thumbnail_base64` | **forwarded verbatim on every `/persons` response** | Display-only and never persisted — `frs_persons` has no thumbnail column and does not get one — so it rides along on the model that `/persons` already returns, giving the frontend a face per row in one request. The value is passed through unchanged, **not** re-encoded or prefixed: the frontend is responsible for checking whether it already carries a `data:` prefix before rendering it |
+
+Every layer and feature created by this integration uses `module_slug = "face-recognition-system"`, validated against the whitelist in `utils/constants.py`.
+
+### Reconciliation
+
+Idempotent in both halves. The registry sync always runs: it upserts on `camera_id` against the global table, so a second call updates rather than duplicates. The layer/feature half runs only when `?case_id=` was sent, and is case-scoped and idempotent like the Email Dump import:
+
+| Step | Key |
+| --- | --- |
+| Layers | `case_id` + name + `module_slug` |
+| Point features | Created, amended, or left alone, matched on `properties.camera_id` (cameras) or the camera key (persons) |
+| Unchanged detection | Name, geometry type, properties and **coordinates** all compared, so a re-import of identical data reports `features_unchanged` rather than rewriting |
+| Stale layers | Counted and reported; never deleted |
+
+The camera import counts only `layer_type = "camera"` layers. Person history layers share the FRS `module_slug`, so counting on the slug alone would report every person's sighting layer in the case as a stale camera.
+
+Nothing is removed when the provider stops reporting it. **Withdrawn cameras and dropped sightings keep their layers, their features, and any analyst comments or evidence attachments**, because an observation that was real when recorded is not retroactively wrong just because upstream pruned it. `layers_stale` reports the count; it is not an instruction to clean up.
+
+Amended features are written with `db.commit()`, not `db.flush()`. `get_db` closes the request-scoped session without committing, so a flush-only update would be rolled back at the end of the request and the `features_updated` the response reports would never reach the database.
+
+### Registry tables and the route endpoint
+
+The map layer answers **where on the map**. It cannot answer **in what order was this person seen**, because the history import deliberately collapses per-detection entries into one point per camera — correct for a map, and exactly what destroys the ordering a route view needs. So the provider's records are also held as real tables:
+
+| Table | Key | Scope |
+| --- | --- | --- |
+| `frs_cameras` | `camera_id` | **Global.** The provider owns one registry and sends no case filter, so a camera imported into three cases is one row here and three layers in `layers` |
+| `frs_persons` | `(case_id, person_id)` | Case-scoped. `person_id` is a string even though the provider declares it as an integer |
+| `frs_person_sightings` | surrogate `id` PK; unique `(case_id, person_id, video_id, camera_id, started_at)` | Case-scoped, **one row per raw detection**. `video_id` may be NULL — `source: "camera"` detections (which carry the coordinates) have a camera and a timestamp but no video. This is what the route view reads |
+
+`frs_persons` rows are written by both the sync-on-read `/persons` listing and each history import, so everyone the case knows gets a row whether or not their history was ever pulled — a listed person with no detections answers `/route` as an **empty route** rather than as "never imported". Sightings, in contrast, exist only for detections the provider actually reports: pre-registering a person adds no sighting rows by itself.
+
+There is **no per-detection id** upstream, so the natural key is `(video_id, camera_id, started_at)`. `video_id` is the trustworthy ordering unit where it exists: one video is one camera recording on one clock, so timestamps inside a `video_id` are mutually consistent. Camera-source detections have no video_id but DO carry a camera and a timestamp — they are stored keyed on their camera, and their ordering falls back to the provider's own UTC timestamp (the same cross-clock caveat the multi-video route already documents). The one thing that is never negotiable is the timestamp: an entry without a `started_at` cannot be placed in time, is skipped, and is counted as `sightings_unordered` — kept separate from `skipped_entries`, because "cannot be ordered" and "has no coordinates" are different failures the frontend must show differently. A fabricated timestamp would be worse than a visible skip.
+
+**Sightings snapshot the camera coordinates.** A sighting stores the lat/long the provider reported for it rather than joining to `frs_cameras`, because a join would silently relocate historical evidence every time a camera is repositioned — rewriting where past sightings were actually captured. The disagreement is recorded as `camera_moved` instead, and `frs_cameras.coordinates_changed_at` records when the camera last moved. Nothing is ever deleted or pruned: sightings are evidence, and a record the provider stops reporting is retained and counted.
+
+`GET .../persons/{person_id}/route` reads those rows in time order. Read-only and entirely local — no provider call, no writes. `limit` (1–5000, default 500) caps the response.
+
+**Each sighting is a detection at a camera, not a measured position of the subject.** The provider reports the camera's own coordinates, so a person walking ten metres past a lens is still reported at the lens; the caller draws the line. `single_video` reports how far the ordering can be trusted: within one video it is sound, across videos it rests on the provider normalising every camera to UTC — which it asserts but exposes no way to verify, as the camera payload carries no clock-sync or NTP field. A multi-camera route should be presented as an **inferred** sequence, not a measured path, and the per-point timestamps shown so an analyst can see apparent back-tracking where two cameras captured the person at the same instant.
+
+The `video_id` tiebreaker in the ordering is not cosmetic: without it, two identical requests can return the same two points in different orders, and a polyline drawn from that visibly jitters between refreshes.
+
+### WebSocket events
+
+New layers broadcast `layer.created`. Feature writes broadcast `feature.batch_created` for new points and `feature.batch_updated` for amended ones. Nothing new is registered, and an unchanged import broadcasts nothing at all.
+
+### Errors
+
+| Situation | GIS response |
+| --- | --- |
+| `FRS_API_BASE_URL` not set | `503` configuration error |
+| Upstream timeout | `504` gateway timeout |
+| Connection failure | `503` service unavailable |
+| Upstream `401` / `403` | `401` unauthorized |
+| Upstream `404` | `404` provider resource error |
+| Upstream `429` | `503` rate limited |
+| Upstream `5xx` | `503` service unavailable |
+| Malformed JSON, or a payload with no usable list | `503` invalid provider response |
+| One malformed camera / person / history record | skipped and counted, import continues |
+| Missing, out-of-range, or `(0, 0)` coordinates | skipped and counted, import continues |
+| Detection with no `video_id` or `started_at` | not stored; counted as `sightings_unordered` |
+| Registry write failure | `503` — the transaction is rolled back |
+| History empty, or nothing in it mappable | `200` — empty import (sightings still stored, `layers` empty, `points` `0`); when detections exist but have no coordinates, `message` reads "No coordinates of this particular person are present." |
+| Route for a person the provider has never listed for the case | `404` — the sync-on-read listing gives every known person a registry row, so an empty route means "listed but no detections" |
+
+The upstream response body, provider credentials, bearer tokens, database connection strings and internal tracebacks are never returned. Everything goes through the typed application exceptions in `utils/exceptions.py` and the shared exception handler.
+
+### Example
+
+```http
+GET /face-recognition-system/cameras?case_id=123
+Authorization: Bearer <token>
+```
+
+GIS then calls `GET http://192.168.6.63:8003/api/cameras` with the same token (never with a `case_id` — the provider registry is global), upserts `frs_cameras`, imports the case's layers and features, and answers:
+
+```json
+{
+  "success": true,
+  "data": [
+    { "camera_id": "12", "name": "Gate 2", "zone": "North", "status": "online",
+      "latitude": 25.2, "longitude": 55.27, "frs_case_id": "7",
+      "coordinates_changed_at": null, "created_at": "...", "updated_at": "..." }
+  ],
+  "case_id": 123,
+  "cameras": 2,
+  "registry_created": 1, "registry_updated": 1, "cameras_moved": 0,
+  "skipped_cameras": 0,
+  "layers": [
+    { "id": 40, "case_id": 123, "name": "FRS Camera 12",
+      "layer_type": "camera", "module_slug": "face-recognition-system", "visible": true }
+  ],
+  "layers_created": 1, "layers_reused": 0, "layers_stale": 0,
+  "features_created": 1, "features_updated": 0, "features_unchanged": 0
+}
+```
+
+Without `?case_id=`, the same call (`GET /face-recognition-system/cameras`) syncs the registry, returns the identical `data` / registry / `skipped_cameras` fields, and reports `case_id: null` with empty `layers` and zero layer/feature counts — nothing was drawn, but `data` still carries every camera's latitude and longitude for the frontend to plot.
+
+`cameras` is the provider's reported count **before** the coordinate filter, so comparing it with `layers_created` (or with `len(data)`) shows how many cameras were dropped for want of a fix. `data` is read back from `frs_cameras` in stable `camera_id` order, so retained cameras the provider no longer reports are still there.
+
+The raw FRS payload is never returned to the frontend.
+
+## Email Dump Origin IPs
+
+```text
+Frontend  →  GIS Backend  →  Email Dump Backend
+```
+
+The GIS backend is the integration layer. It does not replace or duplicate the Email Dump backend: email analysis, email records, email IDs, risk analysis, origin-IP analysis, and Email Dump authentication all stay upstream. The frontend never calls the Email Dump backend directly — it calls the GIS route, which forwards the request and converts the answer into GIS layers and features.
+
 ### Routes
 
 ```text
@@ -385,16 +580,36 @@ The origin-IP route forwards `target_id` and `dump_id` verbatim instead of fanni
 
 The import is idempotent and case-scoped. It reconciles against the current payload rather than only inserting, so withdrawn data does not linger:
 
-| Counter | Meaning |
+| Reconciliation step | Key |
 | --- | --- |
-| `layers_created` / `layers_reused` | Layer written vs. matched on `case_id` + name + `module_slug` |
-| `features_created` / `features_updated` / `features_unchanged` / `features_removed` | Point features written, amended, left alone, or withdrawn |
-| `emails_created` / `emails_updated` / `emails_removed` | Normalised observations on the key `(case_id, email_id, ip, ip_type)` |
-| `targets_created` / `targets_updated` | Targets on `(case_id, target_id)` |
-| `dumps_created` / `dumps_updated` | Dumps on `(case_id, target_id, dump_id)` |
-| `skipped_coordinates` | IPs with missing or out-of-range coordinates |
+| Layers | `case_id` + name + `module_slug` |
+| Point features | Point features written, amended, left alone, or withdrawn |
+| Normalised email observations | `(case_id, email_id, ip, ip_type)` |
+| Targets | `(case_id, target_id)` |
+| Dumps | `(case_id, target_id, dump_id)` |
+| Skipped coordinates | IPs with missing or out-of-range coordinates |
 
 There is no `features_reused`: a feature is either created, amended, untouched, or removed, and the three cases are reported separately because "nothing to do" and "changed" mean different things to a client waiting on a map.
+
+The response does not carry those per-request counters. It returns five case-wide totals instead:
+
+| Field | Meaning |
+| --- | --- |
+| `targets` | Target rows stored for the case |
+| `dumps` | Dump rows stored for the case |
+| `emails` | `COUNT(DISTINCT email_id)` over the case's `emails` rows |
+| `ips` | Normalised IP observations stored for the case |
+| `features` | Point features on the case whose `module_slug` is `email-dump` |
+
+Three things about these numbers:
+
+- They are cumulative for the case, not for the request. Re-importing the same filters returns the same totals instead of reporting what that one pass happened to rewrite. Counting rows after the import is also what stops a double count: a target reported both as a flat `record.target_id` and inside `record.targets[]` is stored once, and a dump reached through both paths is stored once.
+- `ips` and `features` differ by design. One address seen in two roles is two `emails` rows (keyed on `case_id`, `email_id`, `ip`, `ip_type`) but a single Point feature, because the map groups by IP address. `features` is what is drawn; `ips` is the observations behind it.
+- `features` is scoped by `module_slug = 'email-dump'` because a case also holds `gis` and `telecom-analysis` layers; GeoCLIP, hotspots, uploads and manual drawing are all `gis`. `targets`, `dumps`, `emails` and `ips` need no slug filter, since `email_targets`, `email_dumps` and `emails` hold only Email Dump rows.
+
+`layers` is request-scoped: it is the list of layers *this* request produced, while the five counts are case-wide. On a filtered re-import the two will not agree, which is expected.
+
+The per-request reconciliation is still computed and still written to the "Email Dump origin IPs imported" log line, together with a second "Email Dump case totals" line carrying the five totals. Only the returned shape changed.
 
 ### WebSocket events
 
@@ -429,13 +644,11 @@ GIS then calls `GET http://192.168.6.63:8002/api/emails/single/origin-ips/123?ri
 {
   "success": true,
   "case_id": 123,
-  "module_slug": "email-dump",
-  "layers_created": 1, "layers_reused": 2,
-  "features_created": 5, "features_updated": 1, "features_unchanged": 3, "features_removed": 0,
-  "skipped_coordinates": 1,
-  "emails_created": 6, "emails_updated": 0, "emails_removed": 0,
-  "targets_created": 1, "targets_updated": 0,
-  "dumps_created": 2, "dumps_updated": 0,
+  "targets": 1,
+  "dumps": 2,
+  "emails": 1,
+  "ips": 6,
+  "features": 4,
   "layers": [
     { "id": 25, "case_id": 123, "name": "Email 101",
       "layer_type": "email", "module_slug": "email-dump", "visible": true }

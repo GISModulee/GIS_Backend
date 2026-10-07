@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     EMAIL_DUMP_API_BASE_URL: str = ""
     EMAIL_DUMP_TIMEOUT_SECONDS: float = 30.0
 
+    # External Face Recognition System. FRS owns the camera registry and
+    # the person registry; GIS only proxies the two registries and
+    # converts their payloads into layers and features. The full URL is
+    # always built from this base URL so no host/port is hard-coded in
+    # service logic. Empty is a valid configuration: the app still
+    # starts and only the Face Recognition System routes report a
+    # configuration error.
+    FRS_API_BASE_URL: str = ""
+    FRS_TIMEOUT_SECONDS: float = 30.0
+
     OPENSKY_BASE_URL: str = "https://opensky-network.org/api"
     OPENSKY_TIMEOUT_SECONDS: float = 10.0
     AIRCRAFT_CACHE_TTL_SECONDS: int = 10

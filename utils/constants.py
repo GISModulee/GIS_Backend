@@ -63,11 +63,13 @@ AUTH_ROLE_FORBIDDEN = "You do not have permission to perform this action."
 DEFAULT_MODULE_SLUG = "gis"
 EMAIL_DUMP_MODULE_SLUG = "email-dump"
 TELECOM_ANALYSIS_MODULE_SLUG = "telecom-analysis"
+FRS_MODULE_SLUG = "face-recognition-system"
 
 ALLOWED_MODULE_SLUGS = frozenset({
     DEFAULT_MODULE_SLUG,
     EMAIL_DUMP_MODULE_SLUG,
     TELECOM_ANALYSIS_MODULE_SLUG,
+    FRS_MODULE_SLUG,
 })
 
 MAX_MODULE_SLUG_LENGTH = 80
@@ -290,4 +292,111 @@ EMAIL_DUMP_INVALID_TARGETS_RESPONSE = (
 )
 EMAIL_DUMP_TARGETS_FETCH_FAILED = (
     "Failed to fetch Email Dump targets. Please try again."
+)
+
+# ===================================================
+# FACE RECOGNITION SYSTEM INTEGRATION
+# ===================================================
+# GIS is a proxy for the external Face Recognition System (FRS). FRS owns
+# two registries that GIS does not duplicate: a *global* camera registry
+# and a *case-scoped* person registry. The frontend never calls FRS
+# directly — it calls GIS, which forwards the caller's own CI bearer
+# token and converts provider payloads into GIS layers and features.
+#
+# The asymmetry in the provider contract is deliberate and must be
+# preserved: GET /api/cameras declares case_id as OPTIONAL because the
+# camera registry is global, while both person endpoints declare case_id
+# as REQUIRED. Camera fetches therefore send no case_id, and the person
+# fetches always send one.
+#
+# Layer identity is the provider's own id, never the display name. A name
+# is not unique (two cameras can both be called "Gate 2") and it can
+# exceed the layers.name column width, so keying sync on a name would
+# either collide or truncate into a second, unreconcilable layer. The id
+# is the provider's stable key and is the only part guaranteed to survive
+# a rename upstream.
+#
+# The "FRS Camera" / "FRS Person" prefixes exist for a different reason:
+# layers are unique on (case_id, name), so an import that reused a plain
+# display name could collide with a hand-made analyst layer and abort the
+# whole import on that unique constraint. The prefix makes a collision
+# with an analyst-chosen name effectively impossible, and every lookup is
+# additionally filtered on module_slug so only FRS layers can match.
+
+# --- Cameras ---------------------------------------------------------
+FRS_CAMERAS_PATH = "/api/cameras"
+FRS_LAYER_TYPE = "camera"
+FRS_LAYER_NAME_TEMPLATE = "FRS Camera {camera_id}"
+FRS_FEATURE_NAME_TEMPLATE = "FRS Camera {camera_id}"
+# layers.name is String(100) in models/model.py, so the rendered name is
+# budgeted against the column width rather than left to the database.
+FRS_LAYER_NAME_MAX_LENGTH = 100
+# (0, 0) sits in the Gulf of Guinea. FRS reports it to mean "no fix", so
+# it is treated as an unset coordinate and the camera is skipped rather
+# than plotted as a real observation.
+FRS_NULL_ISLAND_LATITUDE = 0.0
+FRS_NULL_ISLAND_LONGITUDE = 0.0
+
+FRS_NOT_CONFIGURED = (
+    "Face Recognition System integration is not configured. Set FRS_API_BASE_URL."
+)
+FRS_TIMEOUT = "Face Recognition System timed out. Please try again."
+FRS_UNAVAILABLE = "Face Recognition System is unavailable. Please try again."
+FRS_RATE_LIMITED = (
+    "Face Recognition System is rate limiting requests. Please try again later."
+)
+FRS_UNAUTHORIZED = "Face Recognition System rejected the provided credentials."
+FRS_INVALID_RESPONSE = "Face Recognition System returned an invalid response."
+FRS_IMPORT_FAILED = "Failed to import Face Recognition System cameras"
+FRS_NO_CAMERAS = "No Face Recognition System cameras were found for this case."
+FRS_LAYER_NAME_TRUNCATED = (
+    "FRS camera layer name exceeded %s characters and was truncated"
+)
+
+# --- Persons ---------------------------------------------------------
+# Both person endpoints are case-scoped, so case_id is always appended.
+FRS_PERSONS_PATH = "/api/persons"
+FRS_PERSON_HISTORY_PATH = "/api/persons/{person_id}/history"
+FRS_PERSON_LAYER_TYPE = "person"
+# The id is the sync key and is also the part that must survive
+# truncation, so it sits in a suffix rather than in the name body.
+FRS_PERSON_LAYER_NAME_TEMPLATE = "FRS Person {person_name} ({person_id})"
+FRS_PERSON_FEATURE_NAME_TEMPLATE = "FRS Person {person_id} at Camera {camera_id}"
+
+FRS_NO_PERSONS = "No Face Recognition System persons were found for this case."
+FRS_NO_PERSON_HISTORY = "No sighting history was found for this person."
+FRS_PERSON_IMPORT_FAILED = "Failed to import Face Recognition System sightings"
+FRS_PERSON_NO_COORDINATES = "No coordinates of this particular person are present."
+FRS_PERSON_LAYER_NAME_TRUNCATED = (
+    "FRS person layer name exceeded %s characters and was truncated"
+)
+
+# ---- Registry tables --------------------------------------------------
+# The registry tables (frs_cameras / frs_persons / frs_person_sightings)
+# hold the provider's records as real rows alongside the map layer. The
+# messages below cover writing them, reading the ordered route, and
+# reading the camera registry back.
+
+FRS_REGISTRY_WRITE_FAILED = (
+    "Failed to save Face Recognition System records to the registry"
+)
+FRS_REGISTRY_READ_FAILED = (
+    "Failed to read Face Recognition System camera registry"
+)
+FRS_ROUTE_FAILED = (
+    "Failed to read Face Recognition System sighting route"
+)
+# An entry with no video_id or no started_at has no key that can be
+# ordered in time, and storing it under a placeholder would fabricate a
+# sequence the data does not support.
+FRS_SIGHTING_UNORDERED_SKIPPED = (
+    "FRS sighting skipped: no video_id or started_at, so it cannot be "
+    "ordered in time | case_id=%s | person_id=%s"
+)
+# Sightings deliberately keep the coordinates they were captured at. A
+# camera move is recorded, never applied retroactively, so historical
+# evidence is not silently relocated.
+FRS_CAMERA_MOVED = (
+    "FRS camera moved; historical sightings keep their original position | "
+    "camera_id=%s | from_lat=%s | from_long=%s | to_lat=%s | to_long=%s"
 )
